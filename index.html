@@ -1,4 +1,3 @@
-<!-- crampté -->
 <!DOCTYPE html>
 <html lang="fr" class="h-full bg-slate-50 text-slate-900">
 <head>
@@ -26,7 +25,6 @@
     <style>
         body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         
-        /* ISOLATION DES ÉTAPES : Empêche la superposition */
         .step-view:not(.active) { 
             display: none !important; 
         }
@@ -37,18 +35,15 @@
         .progress-bar { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
         .leaflet-container { background-color: #f8fafc; border-radius: 1rem; }
 
-        /* Style des marqueurs Leaflet */
         .company-marker { filter: drop-shadow(0 4px 6px rgba(79, 70, 229, 0.4)); }
         .emp-marker { transition: all 0.2s ease-in-out; }
         .emp-excluded { opacity: 0.25; filter: grayscale(100%); transform: scale(0.8); }
 
-        /* Custom Scrollbar pour le volet droit BBOX */
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: rgba(241, 245, 249, 0.6); border-radius: 8px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-        /* Deck.gl Map Container */
         #map-container {
             width: 100%;
             height: 600px;
@@ -80,7 +75,12 @@
 
         #pdf-hidden-generator { position: absolute; top: -9999px; left: -9999px; visibility: hidden; }
 
-        /* Signature & Branding Marius */
+        .btn-toggle.active {
+            background-color: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+
         .signature {
             text-align: center;
             margin: 40px 0 20px 0;
@@ -115,7 +115,7 @@
                 </div>
                 <div>
                     <span class="text-lg font-extrabold tracking-tight text-slate-800">Marius</span>
-                    <span class="text-xs font-semibold text-indigo-600 ml-2 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">Mobilité & BBOX</span>
+                    <span class="text-xs font-semibold text-indigo-600 ml-2 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">Mobilité & BAN Batch</span>
                 </div>
             </div>
 
@@ -139,7 +139,7 @@
                     <svg class="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                 </div>
                 <h2 class="text-2xl font-black mb-2 text-slate-800 tracking-tight">Plateforme Marius</h2>
-                <p class="text-slate-500 mb-8 text-sm leading-relaxed">Veuillez saisir votre code d'accès pour déverrouiller l'analyse de mobilité.</p>
+                <p class="text-slate-500 mb-8 text-sm leading-relaxed">Saisissez votre code d'accès pour commencer l'analyse.</p>
                 
                 <div class="space-y-4">
                     <input type="password" id="auth-password" placeholder="••••••••" class="w-full p-4 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-center font-mono text-xl tracking-widest transition-all">
@@ -151,7 +151,7 @@
             </div>
         </section>
 
-        <!-- STEP 1: CSV PARSER -->
+        <!-- STEP 1: CSV PARSER AVEC PRÉVISUALISEUR & FUSION DE COLONNES -->
         <section id="step-csv" class="step-view">
             <div id="session-banner" class="bg-emerald-50 text-emerald-800 px-5 py-3 rounded-2xl border border-emerald-200 mb-8 flex items-center justify-between shadow-sm">
                 <div class="flex items-center space-x-3">
@@ -161,25 +161,77 @@
                 <span class="text-[10px] uppercase font-black text-emerald-600 tracking-wider">Session Active</span>
             </div>
 
-            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-10 text-center max-w-2xl mx-auto">
-                <h2 class="text-2xl font-black mb-2 text-slate-800 tracking-tight">Importation des effectifs</h2>
-                <p class="text-slate-500 text-sm mb-8">Chargez le fichier CSV de vos collaborateurs pour démarrer l'analyse spatiale.</p>
+            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 max-w-4xl mx-auto">
+                <div class="text-center mb-8">
+                    <h2 class="text-2xl font-black mb-2 text-slate-800 tracking-tight">Importation & Sélection des Colonnes</h2>
+                    <p class="text-slate-500 text-sm">Sélectionnez votre fichier CSV pour associer librement les colonnes constituant les adresses.</p>
+                </div>
                 
-                <label class="flex flex-col items-center p-10 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/20 cursor-pointer transition-all group mb-4">
-                    <span class="text-4xl mb-3">📄</span>
-                    <span class="text-sm font-bold text-slate-700 group-hover:text-indigo-600">Sélectionner un fichier CSV</span>
-                    <span class="text-xs text-slate-400 mt-1">Format requis : Adresse employé, Adresse employeur</span>
-                    <input type="file" id="csv-input" class="hidden" accept=".csv" />
-                </label>
+                <div id="csv-upload-box" class="mb-6">
+                    <label class="flex flex-col items-center p-8 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/20 cursor-pointer transition-all group">
+                        <span class="text-4xl mb-2">📄</span>
+                        <span class="text-sm font-bold text-slate-700 group-hover:text-indigo-600">Sélectionner un fichier CSV</span>
+                        <span class="text-xs text-slate-400 mt-1">Soutient tous les séparateurs (; ou ,)</span>
+                        <input type="file" id="csv-input" class="hidden" accept=".csv" />
+                    </label>
+                </div>
+
+                <!-- Zone de prévisualisation et mapping (masquée par défaut) -->
+                <div id="csv-preview-container" class="hidden space-y-6 border-t border-slate-200 pt-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                            <span>👀 Aperçu des données</span>
+                            <span id="csv-row-count" class="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-600"></span>
+                        </h3>
+                    </div>
+
+                    <!-- Tableau d'aperçu des 5 premières lignes -->
+                    <div class="overflow-x-auto border border-slate-200 rounded-xl max-h-48 custom-scrollbar">
+                        <table id="csv-preview-table" class="w-full text-xs text-left text-slate-600">
+                            <!-- Injecté par CSVParser -->
+                        </table>
+                    </div>
+
+                    <!-- Sélecteur de colonnes à fusionner -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-5 rounded-2xl border border-slate-200">
+                        <div>
+                            <label class="block text-xs font-extrabold uppercase tracking-wider text-indigo-900 mb-2">
+                                🏠 Adresse Employé (Cochez les colonnes à fusionner)
+                            </label>
+                            <div id="emp-cols-container" class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
+                                <!-- Checkboxes colonnes employé -->
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-extrabold uppercase tracking-wider text-indigo-900 mb-2">
+                                🏢 Adresse Employeur (Cochez les colonnes à fusionner)
+                            </label>
+                            <div id="site-cols-container" class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
+                                <!-- Checkboxes colonnes employeur -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="btn-confirm-columns" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-200 active:scale-[0.98] flex items-center justify-center gap-2">
+                        <span>Valider la sélection & lancer le géocodage BAN Batch</span>
+                        <span>→</span>
+                    </button>
+                </div>
             </div>
         </section>
 
-        <!-- STEP 2: GEOCODER -->
+        <!-- STEP 2: GEOCODER BAN BATCH -->
         <section id="step-geo" class="step-view">
             <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-12 max-w-lg mx-auto text-center">
-                <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-bounce">📍</div>
-                <h3 class="text-xl font-extrabold text-slate-800 mb-2">Géocodage des Adresses...</h3>
-                <p class="text-slate-500 text-xs mb-6">Marius géocode les positions GPS via la Base Adresse Nationale et Nominatim.</p>
+                <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-pulse">⚡</div>
+                <h3 class="text-xl font-extrabold text-slate-800 mb-2">Géocodage BAN Batch en cours...</h3>
+                <p class="text-slate-500 text-xs mb-6">Traitement haute vitesse par lots via l'API officielle Base Adresse Nationale (Gouvernement).</p>
+                
+                <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3 border border-slate-200">
+                    <div id="geo-progress-bar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
+                </div>
+                <p id="geo-progress-text" class="text-xs font-bold text-slate-600 italic">Préparation des lots d'adresses...</p>
             </div>
         </section>
 
@@ -187,13 +239,12 @@
         <section id="step-bbox" class="step-view">
             <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 flex flex-col gap-4">
                 
-                <!-- En-tête BBOX -->
                 <div class="flex flex-wrap items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                     <div class="flex items-center gap-3">
                         <div class="w-3 h-3 rounded-full bg-emerald-500 animate-ping"></div>
                         <div>
                             <h3 class="text-sm font-extrabold text-slate-800">Optimisation d'Emprise BBOX (Géoplateforme IGN)</h3>
-                            <p class="text-[11px] text-slate-500">Scan automatique des scénarios WFS (BDTOPO_V3)</p>
+                            <p class="text-[11px] text-slate-500">Scan des scénarios WFS (BDTOPO_V3)</p>
                         </div>
                     </div>
 
@@ -207,16 +258,14 @@
                     </div>
                 </div>
 
-                <!-- CARTE LEAFLET + VOLET DROIT DE POPUPS SCÉNARIOS -->
+                <!-- CARTE LEAFLET + VOLET DROIT SANS ROGNAGE -->
                 <div class="relative w-full h-[620px] rounded-2xl overflow-hidden border border-slate-200">
-                    
                     <div id="bboxMap" class="w-full h-full z-0"></div>
 
-                    <!-- VOLET DROIT SANS ROGNAGE -->
-                    <div id="bbox-popups-container" class="absolute top-4 right-4 z-[1000] w-80 max-w-[calc(100%-2rem)] max-h-[580px] overflow-y-auto custom-scrollbar space-y-3 pointer-events-auto pr-2">
+                    <!-- VOLET DROIT DES SCÉNARIOS -->
+                    <div id="bbox-popups-container" class="absolute top-4 right-4 z-[1000] w-80 max-w-[calc(100%-2rem)] max-h-[580px] overflow-y-auto custom-scrollbar space-y-3 pointer-events-auto pr-1">
                         <!-- Pop-ups injectées par BboxOptimizer -->
                     </div>
-
                 </div>
             </div>
         </section>
@@ -224,8 +273,8 @@
         <!-- STEP 3: ROUTE API -->
         <section id="step-route" class="step-view">
             <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 max-w-2xl mx-auto">
-                <h3 class="text-xl font-black mb-2 text-slate-800">Calcul du Réseau (router.js)</h3>
-                <p class="text-slate-500 text-xs mb-6">Réception de l'emprise BBOX optimisée et génération des itinéraires.</p>
+                <h3 class="text-xl font-black mb-2 text-slate-800">Calcul du Réseau (router_api.js)</h3>
+                <p class="text-slate-500 text-xs mb-6">Emprise BBOX transmise avec succès. Génération des itinéraires...</p>
                 <div id="route-logs" class="bg-slate-900 text-teal-400 p-5 rounded-2xl font-mono text-xs h-56 overflow-y-auto text-left leading-relaxed shadow-inner">
                     > Transmetteur BBOX initialisé...
                 </div>
