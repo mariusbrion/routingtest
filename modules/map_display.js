@@ -4,9 +4,10 @@ export const MapDisplay = {
     deckgl: null,
     lastState: null,
     isCityValidated: false,
+    displayMode: 'both', // 'heatmap' | 'flow' | 'both'
     heatmapSettings: {
-        radius: 35,
-        threshold: 0.03
+        radius: 20,
+        threshold: 0.04
     },
 
     render(state) {
@@ -27,7 +28,7 @@ export const MapDisplay = {
 
         const allTrajectoryPoints = [];
         const pointFeatures = [];
-        const pathFeatures = [];
+        const decodedRoutes = [];
 
         state.routes.forEach(route => {
             let coords = [];
@@ -38,8 +39,8 @@ export const MapDisplay = {
             }
 
             if (coords.length > 0) {
-                pathFeatures.push({ path: coords });
-                const sampled = this.samplePolylinePoints(coords, 0.05);
+                decodedRoutes.push(coords);
+                const sampled = this.samplePolylinePoints(coords, 0.03);
                 sampled.forEach(p => allTrajectoryPoints.push(p));
 
                 pointFeatures.push({
@@ -55,6 +56,8 @@ export const MapDisplay = {
                 });
             }
         });
+
+        const { segments, maxPassages } = this.computeSegmentFrequencies(decodedRoutes);
 
         const isochroneFeatures = state.isochrones 
             ? [...state.isochrones].sort((a, b) => b.properties.range_km - a.properties.range_km) 
@@ -80,40 +83,55 @@ export const MapDisplay = {
                 getFillColor: d => this.getIsochroneColor(d.properties.range_km),
                 getLineColor: [255, 255, 255, 100],
                 getLineWidth: 1
-            }),
-            new deck.PathLayer({
-                id: 'routes-glow-layer',
-                data: pathFeatures,
-                getPath: d => d.path,
-                getColor: [99, 102, 241, 100],
-                getWidth: 6,
-                widthMinPixels: 2
-            }),
-            new deck.HeatmapLayer({
-                id: 'heatmap-layer',
-                data: allTrajectoryPoints,
-                getPosition: d => d.coords,
-                getWeight: () => 1,
-                radiusPixels: this.heatmapSettings.radius || 35,
-                intensity: 1.5,
-                threshold: this.heatmapSettings.threshold || 0.03,
-                colorRange: [
-                    [34, 197, 94, 40],
-                    [241, 196, 15, 120],
-                    [230, 126, 34, 180],
-                    [231, 76, 60, 230],
-                    [155, 89, 182, 255]
-                ]
-            }),
+            })
+        ];
+
+        if (this.displayMode === 'heatmap' || this.displayMode === 'both') {
+            layers.push(
+                new deck.HeatmapLayer({
+                    id: 'heatmap-layer',
+                    data: allTrajectoryPoints,
+                    getPosition: d => d.coords,
+                    getWeight: () => 1,
+                    radiusPixels: this.heatmapSettings.radius,
+                    intensity: 1.8,
+                    threshold: this.heatmapSettings.threshold,
+                    colorRange: [
+                        [255, 255, 204, 30],  // Halo Jaune très clair
+                        [254, 217, 118, 120], // Jaune chaud
+                        [254, 178, 76, 180],  // Orange vif
+                        [240, 59, 32, 220],   // Rouge
+                        [189, 0, 38, 245],    // Rouge foncé / Carmin
+                        [128, 0, 38, 255]     // Violet / Bordeaux intense
+                    ]
+                })
+            );
+        }
+
+        if (this.displayMode === 'flow' || this.displayMode === 'both') {
+            layers.push(
+                new deck.PathLayer({
+                    id: 'routes-flow-layer',
+                    data: segments,
+                    getPath: d => d.path,
+                    getColor: d => this.getSegmentColor(d.count, maxPassages),
+                    getWidth: d => this.getSegmentWidth(d.count, maxPassages),
+                    widthMinPixels: 2,
+                    pickable: true
+                })
+            );
+        }
+
+        layers.push(
             new deck.GeoJsonLayer({
                 id: 'points-layer',
                 data: { type: "FeatureCollection", features: pointFeatures },
                 pickable: true,
                 getFillColor: d => d.properties.type === 'arrivee' ? [239, 68, 68] : [34, 197, 94],
                 getPointRadius: 25,
-                pointRadiusMinPixels: 4
+                pointRadiusMinPixels: 5
             })
-        ];
+        );
 
         const initialView = this.calculateInitialView(state);
 
@@ -126,6 +144,7 @@ export const MapDisplay = {
                 glOptions: { preserveDrawingBuffer: true },
                 getTooltip: ({object}) => {
                     if (!object) return null;
+                    if (object.count) return `${object.count} passage(s) de salarié(s)`;
                     if (object.properties && object.properties.range_km) return `Isochrone: ${object.properties.range_km} km`;
                     if (object.properties && object.properties.type) return object.properties.type === 'arrivee' ? "Site Employeur" : "Départ Employé";
                     return null;
@@ -136,6 +155,50 @@ export const MapDisplay = {
         }
     },
 
+    computeSegmentFrequencies(routes) {
+        const segmentMap = new Map();
+        let maxPassages = 1;
+
+        routes.forEach(coords => {
+            for (let i = 0; i < coords.length - 1; i++) {
+                const p1 = coords[i];
+                const p2 = coords[i + 1];
+
+                const k1 = `${p1[0].toFixed(5)},${p1[1].toFixed(5)}`;
+                const k2 = `${p2[0].toFixed(5)},${p2[1].toFixed(5)}`;
+                const key = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+
+                const existing = segmentMap.get(key);
+                if (existing) {
+                    existing.count += 1;
+                    if (existing.count > maxPassages) maxPassages = existing.count;
+                } else {
+                    segmentMap.set(key, { path: [p1, p2], count: 1 });
+                }
+            }
+        });
+
+        return {
+            segments: Array.from(segmentMap.values()),
+            maxPassages
+        };
+    },
+
+    getSegmentColor(count, maxCount) {
+        if (count === 1) return [234, 179, 8, 180];    // Jaune (1 passage)
+        if (count <= 3) return [249, 115, 22, 220];   // Orange (2-3 passages)
+        if (count <= 6) return [239, 68, 68, 240];    // Rouge (4-6 passages)
+        if (count <= 10) return [185, 28, 28, 255];   // Rouge sombre (7-10 passages)
+        return [126, 34, 206, 255];                   // Pourpre / Bordeaux (10+ passages)
+    },
+
+    getSegmentWidth(count, maxCount) {
+        if (count === 1) return 3;
+        if (count <= 3) return 5;
+        if (count <= 6) return 7;
+        return 9;
+    },
+
     initHeatmapControls() {
         if (document.getElementById('heatmap-controls')) return;
 
@@ -144,23 +207,60 @@ export const MapDisplay = {
 
         const controls = document.createElement('div');
         controls.id = 'heatmap-controls';
-        controls.className = 'absolute top-4 right-4 bg-white/90 backdrop-blur p-4 rounded-xl shadow-lg z-[50] border border-slate-200 w-48';
+        controls.className = 'absolute top-4 right-4 bg-white/95 backdrop-blur p-4 rounded-2xl shadow-xl z-[50] border border-slate-200 w-56 space-y-3';
         controls.innerHTML = `
-            <h4 class="text-[10px] font-bold uppercase text-slate-500 mb-3 tracking-widest">Réglages Heatmap</h4>
-            <div class="mb-3">
-                <label class="block text-[9px] mb-1 font-bold">Rayon: <span id="val-radius">${this.heatmapSettings.radius}</span></label>
-                <input type="range" id="input-radius" min="10" max="100" value="${this.heatmapSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+            <h4 class="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Visualisation des Flux</h4>
+            
+            <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button id="btn-mode-heatmap" class="flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${this.displayMode === 'heatmap' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}">
+                    🔥 Heatmap
+                </button>
+                <button id="btn-mode-flow" class="flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${this.displayMode === 'flow' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}">
+                    🔀 Flux
+                </button>
+                <button id="btn-mode-both" class="flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${this.displayMode === 'both' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}">
+                    ✨ Tout
+                </button>
             </div>
-            <div>
-                <label class="block text-[9px] mb-1 font-bold">Seuil: <span id="val-threshold">${this.heatmapSettings.threshold}</span></label>
-                <input type="range" id="input-threshold" min="0.01" max="0.2" step="0.01" value="${this.heatmapSettings.threshold}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+
+            <div id="heatmap-sliders-box" class="pt-1 border-t border-slate-100 ${this.displayMode === 'flow' ? 'hidden' : ''}">
+                <div class="mb-2">
+                    <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
+                        <span>Rayon de diffusion</span>
+                        <span id="val-radius" class="text-indigo-600">${this.heatmapSettings.radius}px</span>
+                    </div>
+                    <input type="range" id="input-radius" min="5" max="60" value="${this.heatmapSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                </div>
+                <div>
+                    <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
+                        <span>Seuil d'intensité</span>
+                        <span id="val-threshold" class="text-indigo-600">${this.heatmapSettings.threshold}</span>
+                    </div>
+                    <input type="range" id="input-threshold" min="0.01" max="0.2" step="0.01" value="${this.heatmapSettings.threshold}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                </div>
             </div>
         `;
         container.appendChild(controls);
 
+        const updateModeUI = (newMode) => {
+            this.displayMode = newMode;
+            document.getElementById('btn-mode-heatmap').className = `flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${newMode === 'heatmap' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}`;
+            document.getElementById('btn-mode-flow').className = `flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${newMode === 'flow' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}`;
+            document.getElementById('btn-mode-both').className = `flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${newMode === 'both' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}`;
+            
+            const slidersBox = document.getElementById('heatmap-sliders-box');
+            if (slidersBox) slidersBox.classList.toggle('hidden', newMode === 'flow');
+
+            this.render(this.lastState);
+        };
+
+        document.getElementById('btn-mode-heatmap').onclick = () => updateModeUI('heatmap');
+        document.getElementById('btn-mode-flow').onclick = () => updateModeUI('flow');
+        document.getElementById('btn-mode-both').onclick = () => updateModeUI('both');
+
         document.getElementById('input-radius').oninput = (e) => {
             this.heatmapSettings.radius = parseInt(e.target.value);
-            document.getElementById('val-radius').innerText = this.heatmapSettings.radius;
+            document.getElementById('val-radius').innerText = `${this.heatmapSettings.radius}px`;
             this.render(this.lastState);
         };
         document.getElementById('input-threshold').oninput = (e) => {
@@ -336,7 +436,7 @@ export const MapDisplay = {
         return R * 2 * Math.atan2(Math.sqrt(clampedA), Math.sqrt(1 - clampedA));
     },
 
-    samplePolylinePoints(coords, stepKm = 0.05) {
+    samplePolylinePoints(coords, stepKm = 0.03) {
         const points = [];
         if (!coords || coords.length === 0) return points;
 
