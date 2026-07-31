@@ -1,28 +1,24 @@
-/**
- * main.js - Orchestrateur Central Marius
- * Intermédiaire de mémoire entre le parser CSV, l'optimiseur BBOX et router_api.js
- */
-
+import { Auth } from './modules/auth.js';
+import { CSVParser } from './modules/csv_parser.js';
+import { Geocoder } from './modules/geocoder.js';
 import { BboxOptimizer } from './modules/bbox_optimizer.js';
 import { RouterAPI } from './modules/router_api.js';
+import { MapDisplay } from './modules/map_display.js';
+import { Analytics } from './modules/analytics.js';
 
 const App = {
-    // État global de l'application
     appState: {
         currentStep: 'step-auth',
         isAuthenticated: false,
         userName: null,
         rawData: null,
-        coordinates: null,    // { company: {lat, lng}, employees: [{id, lat, lng}] }
-        selectedBbox: null,   // Emprise BBOX retenue
+        coordinates: null,      // Géocodage réel { start_lat, start_lon, end_lat, end_lon, ... }
+        selectedBbox: null,     // Emprise BBOX validée
         routes: null
     },
 
     stepsOrder: ['step-auth', 'step-csv', 'step-geo', 'step-bbox', 'step-route', 'step-map'],
 
-    /**
-     * Utilitaire de nettoyage du nom d'utilisateur
-     */
     cleanName(name) {
         if (!name) return "Anonyme";
         let cleaned = String(name);
@@ -38,68 +34,12 @@ const App = {
         window.App = this; 
         window.BboxOptimizer = BboxOptimizer;
 
+        Auth.init();
+        CSVParser.init();
+        Geocoder.init();
         RouterAPI.init();
-        this.setupAuth();
-        this.setupCsvListener();
 
         window.addEventListener('nextStep', (event) => this.handleNavigation(event));
-    },
-
-    setupAuth() {
-        const btnLogin = document.getElementById('btn-login');
-        if (btnLogin) {
-            btnLogin.onclick = () => {
-                const pwd = document.getElementById('auth-password')?.value;
-                if (pwd) {
-                    this.triggerNavigation({
-                        userName: "Connecté en tant que: Marius Admin",
-                        isAuthenticated: true
-                    }, 'step-csv');
-                }
-            };
-        }
-    },
-
-    setupCsvListener() {
-        const csvInput = document.getElementById('csv-input');
-        if (csvInput) {
-            csvInput.onchange = () => {
-                this.loadDemoData();
-            };
-        }
-    },
-
-    loadDemoData() {
-        // Siège social : Paris Centre
-        const company = { lat: 48.8566, lng: 2.3522, name: "Siège Social Marius" };
-        const employees = [];
-
-        // Génération de 50 employés avec des profil variés (dont isolés éloignés)
-        for (let i = 0; i < 50; i++) {
-            const isOutlier = i % 10 === 0; // 10% d'isolés éloignés
-            const radius = isOutlier ? 0.35 + Math.random() * 0.4 : 0.08 * (Math.random() + Math.random());
-            const angle = Math.random() * Math.PI * 2;
-            
-            employees.push({
-                id: `emp-${i + 1}`,
-                lat: company.lat + Math.sin(angle) * radius,
-                lng: company.lng + Math.cos(angle) * radius * 1.3
-            });
-        }
-
-        const coordinates = { company, employees };
-
-        this.triggerNavigation({
-            rawData: "demo_csv_content",
-            coordinates: coordinates
-        }, 'step-geo');
-    },
-
-    triggerNavigation(data, nextStep) {
-        const event = new CustomEvent('nextStep', {
-            detail: { data, next: nextStep }
-        });
-        window.dispatchEvent(event);
     },
 
     handleNavigation(event) {
@@ -126,16 +66,22 @@ const App = {
                 break;
 
             case 'step-geo':
-                setTimeout(() => {
-                    this.triggerNavigation({}, 'step-bbox');
-                }, 800);
+                if (this.appState.rawData) {
+                    Geocoder.startGeocoding(this.appState.rawData);
+                }
                 break;
 
             case 'step-bbox':
                 if (this.appState.coordinates) {
+                    // Transmet les salariés géocodés réels au module BBOX
                     BboxOptimizer.init('bboxMap', this.appState.coordinates, (selectedBboxPayload) => {
-                        console.log("[App] BBOX sélectionnée par l'utilisateur :", selectedBboxPayload);
-                        this.triggerNavigation({ selectedBbox: selectedBboxPayload }, 'step-route');
+                        console.log("[App] BBOX retenue :", selectedBboxPayload);
+                        this.handleNavigation({
+                            detail: {
+                                data: { selectedBbox: selectedBboxPayload },
+                                next: 'step-route'
+                            }
+                        });
                     });
                 }
                 break;
@@ -145,16 +91,23 @@ const App = {
                     RouterAPI.startRouting(this.appState.selectedBbox, this.appState.coordinates, this.appState.userName)
                         .then(routesResult => {
                             setTimeout(() => {
-                                this.triggerNavigation({ routes: routesResult }, 'step-map');
-                            }, 1200);
+                                this.handleNavigation({
+                                    detail: {
+                                        data: { routes: routesResult },
+                                        next: 'step-map'
+                                    }
+                                });
+                            }, 1000);
                         });
                 }
                 break;
 
             case 'step-map':
-                const sess = document.getElementById('session-info');
-                if (sess) {
-                    sess.innerText = this.appState.userName || "Marius Admin";
+                if (this.appState.routes) {
+                    MapDisplay.render(this.appState);
+                    Analytics.init(this.appState);
+                    const sess = document.getElementById('session-info');
+                    if (sess) sess.innerText = this.appState.userName || "Marius Admin";
                 }
                 break;
         }
@@ -176,6 +129,7 @@ const App = {
                 indicator.innerText = stepId === 'step-auth' ? "Authentification" : `Étape ${index} sur ${this.stepsOrder.length - 1}`;
             }
         }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 };
 
