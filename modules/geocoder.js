@@ -1,14 +1,8 @@
-/**
- * modules/geocoder.js
- * Automatisation : Passe au routeur dès que le géocodage est fini.
- */
 export const Geocoder = {
     processedData: [],
     apiStats: { ban: { s: 0, f: 0 }, nom: { s: 0, f: 0 } },
 
     init() {
-        // Le bouton "Suivant" peut rester pour le mode manuel, 
-        // mais il sera court-circuité par l'auto-next.
         const btnNext = document.getElementById('btn-go-route');
         if (btnNext) btnNext.addEventListener('click', () => this.emitNextStep());
     },
@@ -29,7 +23,7 @@ export const Geocoder = {
 
             // 1. Employé
             this.updateUI(currentStepBase, totalSteps, `Géocodage employé ${i + 1}/${total}...`);
-            await this.delay(1200);
+            await this.delay(600);
             const employeeCoords = await this.fetchWithFallback(pair['adresse employé']);
             if (!employeeCoords) continue;
 
@@ -43,9 +37,9 @@ export const Geocoder = {
             if (employerGroups[site]) {
                 employerCoords = employerGroups[site].coords;
                 groupId = employerGroups[site].groupId;
-                await this.delay(300);
+                await this.delay(100);
             } else {
-                await this.delay(1200);
+                await this.delay(600);
                 employerCoords = await this.fetchWithFallback(site);
                 if (!employerCoords) continue;
 
@@ -68,17 +62,15 @@ export const Geocoder = {
             });
         }
 
-        this.updateUI(totalSteps, totalSteps, "Géocodage terminé ! Préparation du routage...");
-        
-        // AUTOMATISATION : On attend un court instant avant de passer à l'étape suivante
-        await this.delay(800);
+        this.updateUI(totalSteps, totalSteps, "Géocodage terminé ! Redirection vers l'optimiseur BBOX...");
+        await this.delay(600);
         this.emitNextStep();
     },
 
     async fetchWithFallback(address) {
         let res = await this.callBAN(address);
         if (res) { this.apiStats.ban.s++; return res; }
-        await this.delay(500);
+        await this.delay(300);
         res = await this.callNominatim(address);
         if (res) { this.apiStats.nom.s++; return res; }
         return null;
@@ -107,7 +99,7 @@ export const Geocoder = {
 
     emitNextStep() {
         window.dispatchEvent(new CustomEvent('nextStep', {
-            detail: { data: { coordinates: this.processedData }, next: 'step-route' }
+            detail: { data: { coordinates: this.processedData }, next: 'step-bbox' }
         }));
     },
 
