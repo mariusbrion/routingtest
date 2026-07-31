@@ -1,8 +1,3 @@
-/**
- * router_api.js (router.js)
- * Script récepteur de l'emprise BBOX optimisée pour calcul du réseau.
- */
-
 export const RouterAPI = {
     init() {
         console.log("[RouterAPI] Initialisé et prêt à recevoir les requêtes d'emprise BBOX.");
@@ -20,16 +15,36 @@ export const RouterAPI = {
             routeLogs.innerHTML += `> Initialisation du calcul réseau...\n`;
         }
 
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         if (routeLogs) {
             routeLogs.innerHTML += `> ✅ Calcul d'itinéraires terminé avec succès !`;
         }
 
-        return {
-            status: "SUCCESS",
-            routesCount: coordinates.employees.length,
-            bboxUsed: selectedBboxPayload.bbox
-        };
+        // Structure standard de résultats d'itinéraires pour MapDisplay et Analytics
+        const routes = coordinates.map((item, idx) => {
+            const startLat = item.start_lat;
+            const startLon = item.start_lon;
+            const endLat = item.end_lat;
+            const endLon = item.end_lon;
+
+            // Distance vol d'oiseau simplifiée
+            const distKm = (Math.sqrt(Math.pow((endLat - startLat) * 111, 2) + Math.pow((endLon - startLon) * 75, 2))).toFixed(2);
+            const durationMin = (distKm * 3.5).toFixed(1); // 17 km/h de moyenne
+
+            return {
+                id: item.id || `route-${idx + 1}`,
+                status: 'success',
+                start_lat: startLat,
+                start_lon: startLon,
+                end_lat: endLat,
+                end_lon: endLon,
+                distance_km: distKm,
+                duration_min: durationMin,
+                geometry: null
+            };
+        });
+
+        return routes;
     }
 };
