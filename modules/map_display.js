@@ -13,6 +13,12 @@ export const MapDisplay = {
 
         this.initCityAutocomplete();
 
+        const saveBtn = document.getElementById('btn-cloud-save');
+        if (saveBtn && !saveBtn.dataset.init) {
+            saveBtn.addEventListener('click', () => this.saveToSheets(this.lastState));
+            saveBtn.dataset.init = "true";
+        }
+
         const pointFeatures = [];
         state.routes.forEach(route => {
             pointFeatures.push({
@@ -119,5 +125,50 @@ export const MapDisplay = {
                 } catch (err) { console.error(err); }
             }, 400);
         });
+    },
+
+    async saveToSheets(state) {
+        const siteName = document.getElementById('input-site-name')?.value.trim();
+        const cityName = document.getElementById('input-city')?.value.trim();
+        const btn = document.getElementById('btn-cloud-save');
+
+        if (!siteName || !cityName) { 
+            alert("Veuillez saisir un nom de site et une ville."); 
+            return; 
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = `<span class="animate-pulse">Export...</span>`;
+
+        try {
+            const anonymizedData = state.routes.map(r => ({
+                id_anonyme: "EMP-" + r.id.toString().slice(-4),
+                distance_km: r.distance_km,
+                duree_min: r.duration_min
+            }));
+
+            const payload = {
+                field1: siteName,
+                field2: cityName,
+                field3: Papa.unparse(anonymizedData)
+            };
+
+            const url = "https://script.google.com/macros/s/AKfycbxgTYcx-62MBamAawDtt3IMgMAFCkudO49be8amsULPoeNkXiYLuh3dXK8zLd9u-hoyAA/exec";
+            
+            await fetch(url, { 
+                method: 'POST', 
+                mode: 'no-cors', 
+                headers: { 'Content-Type': 'text/plain' }, 
+                body: JSON.stringify(payload) 
+            });
+
+            alert("Données anonymisées transmises avec succès !");
+        } catch (error) {
+            console.error(error);
+            alert("Erreur lors de la sauvegarde.");
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = `<span>Sauvegarder</span>`;
+        }
     }
 };
