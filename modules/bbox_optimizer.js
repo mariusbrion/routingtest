@@ -1,14 +1,14 @@
 export const BboxOptimizer = {
     map: null,
-    company: null,       // { lat, lng }
-    employees: [],       // [{ id, lat, lng, distKm, marker }]
+    company: null,
+    employees: [],
     bboxLayer: null,
     scenariosData: [],
     onSelectCallback: null,
 
-    SAFETY_BUFFER_KM: 2.0,   // Buffer +2 km
-    CHUNK_SIZE: 2500,        // 2500 entités
-    CHUNK_DELAY_MS: 800,     // toutes les 800 ms
+    SAFETY_BUFFER_KM: 2.0,
+    CHUNK_SIZE: 2500,
+    CHUNK_DELAY_MS: 800,
 
     init(mapContainerId, geocodedData, onSelectCallback) {
         this.onSelectCallback = onSelectCallback;
@@ -25,11 +25,8 @@ export const BboxOptimizer = {
                 lng: emp.start_lon,
                 address: emp.employee_address
             }));
-        } else if (geocodedData.company && geocodedData.employees) {
-            this.company = geocodedData.company;
-            this.employees = geocodedData.employees;
         } else {
-            console.error("[BboxOptimizer] Aucune donnée de géocodage valide reçue.");
+            console.error("[BboxOptimizer] Aucune donnée valide.");
             return;
         }
 
@@ -39,7 +36,7 @@ export const BboxOptimizer = {
                 <div class="bg-white/95 backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-xl text-center">
                     <div class="w-8 h-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mx-auto mb-3"></div>
                     <div class="text-xs font-black text-slate-800">Scan WFS Géoplateforme en cours...</div>
-                    <div class="text-[10px] text-slate-500 mt-1">Analyse des 0%, 1%, 2%, 5%, 10%, 15%, 20% d'exclusions</div>
+                    <div class="text-[10px] text-slate-500 mt-1">Analyse des exclusions 0% à 20%</div>
                 </div>
             `;
         }
@@ -56,18 +53,15 @@ export const BboxOptimizer = {
         setTimeout(() => {
             this.map.invalidateSize();
             this.renderMarkersAndFitBounds();
-            // LANCEMENT AUTOMATIQUE SANS CLIC
             this.startScan();
         }, 200);
     },
 
     renderMarkersAndFitBounds() {
-        // Nettoyage éventuel des anciens marqueurs
         this.map.eachLayer(layer => {
             if (layer instanceof L.Marker) this.map.removeLayer(layer);
         });
 
-        // Marqueur Entreprise
         const companyIcon = L.divIcon({
             html: `<div class="company-marker text-3xl">🏢</div>`,
             className: '',
@@ -76,7 +70,6 @@ export const BboxOptimizer = {
         });
         const compMarker = L.marker([this.company.lat, this.company.lng], { icon: companyIcon }).addTo(this.map);
 
-        // Employés & Distances
         const markerList = [compMarker];
 
         this.employees = this.employees.map(emp => {
@@ -94,7 +87,6 @@ export const BboxOptimizer = {
 
         this.employees.sort((a, b) => a.distKm - b.distKm);
 
-        // CADRAGE IMMÉDIAT ET AUTOMATIQUE SUR TOUS LES POINTS RÉELS
         const group = L.featureGroup(markerList);
         this.map.fitBounds(group.getBounds().pad(0.15));
     },
@@ -149,9 +141,8 @@ export const BboxOptimizer = {
 
         try {
             const response = await fetch(`${baseUrl}?${params.toString()}`);
-            if (!response.ok) throw new Error("WFS hit error");
+            if (!response.ok) throw new Error("WFS error");
             const xmlText = await response.text();
-            
             const match = xmlText.match(/numberMatched="(\d+)"/i);
             return match ? parseInt(match[1], 10) : Math.round(bbox.areaKm2 * 180);
         } catch (e) {
@@ -162,7 +153,6 @@ export const BboxOptimizer = {
     async startScan() {
         const statusBadge = document.getElementById('bbox-status-badge');
         if (statusBadge) {
-            statusBadge.classList.remove('hidden');
             statusBadge.innerHTML = `<span class="animate-spin text-indigo-600">⏳</span><span>Scan WFS en cours...</span>`;
         }
 
@@ -176,7 +166,6 @@ export const BboxOptimizer = {
             if (!uniqueCounts.has(excludeCount) && excludeCount < totalEmp) {
                 uniqueCounts.add(excludeCount);
                 scenarioConfigs.push({
-                    pctRequested: pct,
                     excludeCount,
                     keepCount: totalEmp - excludeCount,
                     realPctExcluded: ((excludeCount / totalEmp) * 100).toFixed(1)
@@ -204,7 +193,6 @@ export const BboxOptimizer = {
 
             this.scenariosData.push({
                 id: i,
-                config,
                 bbox,
                 keptEmployees: kept,
                 excludedCount: config.excludeCount,
@@ -222,7 +210,6 @@ export const BboxOptimizer = {
         const warn = document.getElementById('volume-warning');
         if (warn) {
             warn.classList.toggle('hidden', !hasCriticalVolume);
-            warn.classList.toggle('flex', hasCriticalVolume);
         }
 
         if (statusBadge) {
@@ -292,7 +279,6 @@ export const BboxOptimizer = {
                     </div>
                 ` : ''}
 
-                <!-- Metric 1: Employés exclus -->
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                         <span>🧑</span>
@@ -301,7 +287,6 @@ export const BboxOptimizer = {
                     <span class="text-[10px] font-mono text-slate-500">${sc.keptEmployees.length} conservés</span>
                 </div>
 
-                <!-- Metric 2 & 3: Gain de surface (%) & Temps estimé -->
                 <div class="grid grid-cols-2 gap-2 my-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
                     <div>
                         <div class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Gain Surface</div>
@@ -317,7 +302,6 @@ export const BboxOptimizer = {
                     </div>
                 </div>
 
-                <!-- Action Button -->
                 <button onclick="event.stopPropagation(); window.BboxOptimizer.confirmSelection(${idx})" 
                         class="w-full mt-2 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition shadow-md shadow-indigo-100 flex items-center justify-center gap-1">
                     <span>Valider cette BBOX</span>
@@ -336,11 +320,9 @@ export const BboxOptimizer = {
         this.scenariosData.forEach((_, idx) => {
             const card = document.getElementById(`bbox-popup-card-${idx}`);
             if (card) {
-                if (idx === index) {
-                    card.classList.add('ring-2', 'ring-indigo-500', 'border-indigo-500');
-                } else {
-                    card.classList.remove('ring-2', 'ring-indigo-500', 'border-indigo-500');
-                }
+                card.classList.toggle('ring-2', idx === index);
+                card.classList.toggle('ring-indigo-500', idx === index);
+                card.classList.toggle('border-indigo-500', idx === index);
             }
         });
 
