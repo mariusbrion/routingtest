@@ -96,6 +96,22 @@ export const MapDisplay = {
         return [230, 126, 34];
     },
 
+    decodePolyline(str, precision = 5) {
+        if (!str) return [];
+        let index = 0, lat = 0, lng = 0, coordinates = [], shift = 0, result = 0, byte = null, lat_c, lng_c, factor = Math.pow(10, precision);
+        while (index < str.length) {
+            byte = null; shift = 0; result = 0;
+            do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+            lat_c = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            shift = result = 0;
+            do { byte = str.charCodeAt(index++) - 63; result |= (byte & 0x1f) << shift; shift += 5; } while (byte >= 0x20);
+            lng_c = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lat += lat_c; lng += lng_c;
+            coordinates.push([lng / factor, lat / factor]);
+        }
+        return coordinates;
+    },
+
     haversineDistance(lat1, lon1, lat2, lon2) {
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
