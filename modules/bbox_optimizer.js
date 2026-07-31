@@ -1,11 +1,3 @@
-/**
- * bbox_optimizer.js - Module de calcul BBOX & Interrogation IGN Géoplateforme WFS
- * Génère des cartes pop-up modernes à droite de l'écran avec les 3 métriques essentielles :
- * 1. Nombre d'employés exclus (%)
- * 2. Gain de surface en %
- * 3. Temps estimé de traitement
- */
-
 export const BboxOptimizer = {
     map: null,
     company: null,       // { lat, lng }
@@ -18,32 +10,63 @@ export const BboxOptimizer = {
     CHUNK_SIZE: 2500,        // 2500 entités
     CHUNK_DELAY_MS: 800,     // toutes les 800 ms
 
-    init(mapContainerId, coordinates, onSelectCallback) {
+    init(mapContainerId, geocodedData, onSelectCallback) {
         this.onSelectCallback = onSelectCallback;
-        this.company = coordinates.company;
+
+        if (Array.isArray(geocodedData) && geocodedData.length > 0) {
+            this.company = { 
+                lat: geocodedData[0].end_lat, 
+                lng: geocodedData[0].end_lon,
+                address: geocodedData[0].employer_address || "Siège Employeur"
+            };
+            this.employees = geocodedData.map((emp, i) => ({
+                id: emp.id || `emp-${i + 1}`,
+                lat: emp.start_lat,
+                lng: emp.start_lon,
+                address: emp.employee_address
+            }));
+        } else if (geocodedData.company && geocodedData.employees) {
+            this.company = geocodedData.company;
+            this.employees = geocodedData.employees;
+        } else {
+            console.error("[BboxOptimizer] Aucune donnée de géocodage valide reçue.");
+            return;
+        }
 
         const popupsContainer = document.getElementById('bbox-popups-container');
-        if (popupsContainer) popupsContainer.innerHTML = '';
+        if (popupsContainer) {
+            popupsContainer.innerHTML = `
+                <div class="bg-white/95 backdrop-blur-md p-5 rounded-2xl border border-slate-200 shadow-xl text-center">
+                    <div class="w-8 h-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mx-auto mb-3"></div>
+                    <div class="text-xs font-black text-slate-800">Scan WFS Géoplateforme en cours...</div>
+                    <div class="text-[10px] text-slate-500 mt-1">Analyse des 0%, 1%, 2%, 5%, 10%, 15%, 20% d'exclusions</div>
+                </div>
+            `;
+        }
 
         if (!this.map) {
-            this.map = L.map(mapContainerId, { zoomControl: false }).setView([this.company.lat, this.company.lng], 11);
+            this.map = L.map(mapContainerId, { zoomControl: false });
             L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
                 attribution: '&copy; OpenStreetMap &copy; CARTO',
                 maxZoom: 19
             }).addTo(this.map);
             L.control.zoom({ position: 'bottomleft' }).addTo(this.map);
-        } else {
-            this.map.setView([this.company.lat, this.company.lng], 11);
         }
 
         setTimeout(() => {
             this.map.invalidateSize();
-        }, 100);
-
-        this.renderMarkers(coordinates.employees);
+            this.renderMarkersAndFitBounds();
+            // LANCEMENT AUTOMATIQUE SANS CLIC
+            this.startScan();
+        }, 200);
     },
 
-    renderMarkers(rawEmployees) {
+    renderMarkersAndFitBounds() {
+        // Nettoyage éventuel des anciens marqueurs
+        this.map.eachLayer(layer => {
+            if (layer instanceof L.Marker) this.map.removeLayer(layer);
+        });
+
         // Marqueur Entreprise
         const companyIcon = L.divIcon({
             html: `<div class="company-marker text-3xl">🏢</div>`,
@@ -51,10 +74,12 @@ export const BboxOptimizer = {
             iconSize: [36, 36],
             iconAnchor: [18, 18]
         });
-        L.marker([this.company.lat, this.company.lng], { icon: companyIcon }).addTo(this.map);
+        const compMarker = L.marker([this.company.lat, this.company.lng], { icon: companyIcon }).addTo(this.map);
 
-        // Distance Haversine & Marqueurs Employés
-        this.employees = rawEmployees.map(emp => {
+        // Employés & Distances
+        const markerList = [compMarker];
+
+        this.employees = this.employees.map(emp => {
             const distKm = this.haversineDistance(this.company.lat, this.company.lng, emp.lat, emp.lng);
             const icon = L.divIcon({
                 html: `<div class="emp-marker w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white shadow-md"></div>`,
@@ -63,17 +88,15 @@ export const BboxOptimizer = {
                 iconAnchor: [7, 7]
             });
             const marker = L.marker([emp.lat, emp.lng], { icon }).addTo(this.map);
+            markerList.push(marker);
             return { ...emp, distKm, marker };
         });
 
-        // Trier du plus proche au plus éloigné
         this.employees.sort((a, b) => a.distKm - b.distKm);
 
-        const group = L.featureGroup([
-            L.marker([this.company.lat, this.company.lng]),
-            ...this.employees.map(e => e.marker)
-        ]);
-        this.map.fitBounds(group.getBounds().pad(0.12));
+        // CADRAGE IMMÉDIAT ET AUTOMATIQUE SUR TOUS LES POINTS RÉELS
+        const group = L.featureGroup(markerList);
+        this.map.fitBounds(group.getBounds().pad(0.15));
     },
 
     haversineDistance(lat1, lon1, lat2, lon2) {
@@ -140,7 +163,7 @@ export const BboxOptimizer = {
         const statusBadge = document.getElementById('bbox-status-badge');
         if (statusBadge) {
             statusBadge.classList.remove('hidden');
-            statusBadge.innerText = '⏳ Scan WFS en cours...';
+            statusBadge.innerHTML = `<span class="animate-spin text-indigo-600">⏳</span><span>Scan WFS en cours...</span>`;
         }
 
         const totalEmp = this.employees.length;
@@ -202,7 +225,10 @@ export const BboxOptimizer = {
             warn.classList.toggle('flex', hasCriticalVolume);
         }
 
-        if (statusBadge) statusBadge.innerText = '✅ Scan Terminé';
+        if (statusBadge) {
+            statusBadge.innerHTML = `<span>✅ Scan Terminé</span>`;
+            statusBadge.className = "px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 font-bold text-xs border border-emerald-200 flex items-center gap-2";
+        }
 
         const recIndex = this.scenariosData.findIndex(s => s.isRecommended);
         this.selectScenario(recIndex >= 0 ? recIndex : 0);
@@ -251,7 +277,7 @@ export const BboxOptimizer = {
             
             const isRec = sc.isRecommended;
 
-            card.className = `p-4 rounded-2xl border transition-all duration-200 cursor-pointer backdrop-blur-md shadow-xl relative ${
+            card.className = `p-4 rounded-2xl border transition-all duration-200 cursor-pointer backdrop-blur-md shadow-xl relative mb-2 ${
                 isRec 
                 ? 'bg-white/95 border-indigo-500 ring-2 ring-indigo-500/30' 
                 : 'bg-white/90 border-slate-200 hover:border-slate-300 hover:bg-white'
@@ -261,8 +287,8 @@ export const BboxOptimizer = {
 
             card.innerHTML = `
                 ${isRec ? `
-                    <div class="absolute -top-2.5 right-4 bg-indigo-600 text-white font-black text-[9px] px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
-                        ★ Suggéré
+                    <div class="absolute -top-2.5 right-3 bg-indigo-600 text-white font-black text-[9px] px-2.5 py-0.5 rounded-full uppercase tracking-wider shadow">
+                        ★ SUGGÉRÉ
                     </div>
                 ` : ''}
 
@@ -275,7 +301,7 @@ export const BboxOptimizer = {
                     <span class="text-[10px] font-mono text-slate-500">${sc.keptEmployees.length} conservés</span>
                 </div>
 
-                <!-- Metric 2 & 3: Gain de surface & Temps estimé -->
+                <!-- Metric 2 & 3: Gain de surface (%) & Temps estimé -->
                 <div class="grid grid-cols-2 gap-2 my-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200/80">
                     <div>
                         <div class="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Gain Surface</div>
