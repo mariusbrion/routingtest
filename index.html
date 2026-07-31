@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr" class="h-full bg-slate-950 text-slate-100">
+<html lang="fr" class="h-full bg-slate-50 text-slate-900">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,57 +23,101 @@
 
     <style>
         body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
-        .step-view { display: none; }
-        .step-view.active { display: block; }
+        
+        /* FIX SUPERPOSITION : La vue non active est strictement masquée */
+        .step-view:not(.active) { 
+            display: none !important; 
+        }
+        .step-view.active { 
+            display: block; 
+        }
+
         .progress-bar { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-        .leaflet-container { background-color: #020617; }
+        .leaflet-container { background-color: #f8fafc; border-radius: 1.5rem; }
 
-        /* Custom Markers Glow */
-        .company-marker { filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.9)); }
-        .emp-marker { filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.8)); }
-        .emp-excluded { filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.8)); opacity: 0.3; }
+        /* Style des marqueurs carte */
+        .company-marker { filter: drop-shadow(0 4px 6px rgba(79, 70, 229, 0.4)); }
+        .emp-marker { transition: all 0.2s ease-in-out; }
+        .emp-excluded { opacity: 0.25; filter: grayscale(100%); transform: scale(0.8); }
 
-        /* Scrollbar Popups */
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        /* Custom Scrollbar pour le volet droit */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(241, 245, 249, 0.8); border-radius: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Signature & Branding Marius */
+        .signature {
+            text-align: center;
+            margin: 40px 0 20px 0;
+            animation: fadeInUp 0.8s ease-out forwards;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .signature a {
+            display: inline-block;
+            color: #475569;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
+            padding: 10px 24px;
+            border-radius: 30px;
+            background: white;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            border: 1px solid #e2e8f0;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .signature a:hover {
+            border-color: #6366f1;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+            transform: translateY(-2px);
+            color: #4f46e5;
+        }
     </style>
 </head>
-<body class="h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 select-none">
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
 
-    <!-- NAVIGATION BAR -->
-    <nav class="h-14 bg-slate-900/90 backdrop-blur border-b border-slate-800/80 px-6 flex items-center justify-between shrink-0 z-50">
-        <div class="flex items-center gap-3">
-            <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black italic shadow-lg shadow-indigo-900/50">
-                M
+    <!-- BARRE DE NAVIGATION CLAIRE -->
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black italic shadow-md shadow-indigo-200">
+                    M
+                </div>
+                <div>
+                    <span class="text-lg font-extrabold tracking-tight text-slate-800">Marius</span>
+                    <span class="text-xs font-semibold text-indigo-600 ml-2 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">BBOX IGN</span>
+                </div>
             </div>
-            <span class="text-base font-bold tracking-tight text-slate-100">Marius <span class="text-xs text-indigo-400 font-normal ml-1">| BBOX Geoplateforme IGN</span></span>
-        </div>
-        
-        <div class="flex items-center gap-4">
-            <div id="step-indicator" class="text-[11px] font-bold uppercase tracking-widest text-indigo-400 bg-indigo-950/60 border border-indigo-800/40 px-3 py-1 rounded-full">
-                Authentification
-            </div>
-            <div class="w-32 bg-slate-800 h-2 rounded-full overflow-hidden">
-                <div id="progress-bar" class="progress-bar h-full bg-indigo-500 w-0"></div>
+
+            <div class="flex items-center space-x-4">
+                <div id="step-indicator" class="text-xs font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100">
+                    Authentification
+                </div>
+                <div class="w-32 bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
+                    <div id="progress-bar" class="progress-bar h-full bg-indigo-600 w-0"></div>
+                </div>
             </div>
         </div>
     </nav>
 
     <!-- APPLICATION MAIN CONTAINER -->
-    <main class="flex-1 relative overflow-hidden flex flex-col">
+    <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-8">
 
         <!-- STEP 0: AUTHENTIFICATION -->
-        <section id="step-auth" class="step-view active h-full overflow-y-auto">
-            <div class="max-w-md mx-auto bg-slate-900/80 backdrop-blur-xl rounded-3xl border border-slate-800 p-8 mt-16 text-center shadow-2xl">
-                <div class="w-16 h-16 bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                    🔒
+        <section id="step-auth" class="step-view active">
+            <div class="max-w-md mx-auto bg-white rounded-3xl shadow-xl border border-slate-200 p-10 mt-12 text-center">
+                <div class="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner">
+                    <svg class="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                 </div>
-                <h2 class="text-2xl font-bold mb-2 text-slate-100">Plateforme Marius</h2>
-                <p class="text-slate-400 text-xs mb-6">Saisissez votre code pour lancer le diagnostic géographique.</p>
+                <h2 class="text-2xl font-black mb-2 text-slate-800 tracking-tight">Plateforme Marius</h2>
+                <p class="text-slate-500 mb-8 text-sm leading-relaxed">Veuillez saisir votre code d'accès pour lancer l'optimisation d'emprise géographique.</p>
+                
                 <div class="space-y-4">
-                    <input type="password" id="auth-password" placeholder="••••••••" value="demo" class="w-full p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-lg focus:border-indigo-500 outline-none text-slate-100">
-                    <button id="btn-login" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-indigo-950">
+                    <input type="password" id="auth-password" placeholder="••••••••" value="demo" class="w-full p-4 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-center font-mono text-xl tracking-widest transition-all">
+                    <button id="btn-login" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-200 active:scale-[0.98]">
                         Accéder au Système
                     </button>
                 </div>
@@ -81,79 +125,114 @@
         </section>
 
         <!-- STEP 1: CSV PARSER -->
-        <section id="step-csv" class="step-view h-full overflow-y-auto p-8">
-            <div class="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center mt-10">
-                <h2 class="text-2xl font-bold mb-2">Importation des effectifs</h2>
-                <p class="text-xs text-slate-400 mb-6"><span id="user-welcome" class="text-indigo-400 font-medium"></span>, chargez la liste de vos collaborateurs.</p>
+        <section id="step-csv" class="step-view">
+            <!-- BANDEAU DE SESSION -->
+            <div id="session-banner" class="bg-emerald-50 text-emerald-800 px-5 py-3 rounded-2xl border border-emerald-200 mb-8 flex items-center justify-between shadow-sm">
+                <div class="flex items-center space-x-3">
+                    <div class="w-7 h-7 rounded-full bg-emerald-200/80 flex items-center justify-center text-emerald-700 font-bold text-xs">
+                        ✓
+                    </div>
+                    <span class="text-sm font-bold">Bienvenue <span id="user-welcome" class="text-indigo-600"></span></span>
+                </div>
+                <span class="text-[10px] uppercase font-black text-emerald-600 tracking-wider">Session Active</span>
+            </div>
+
+            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-10 text-center max-w-2xl mx-auto">
+                <h2 class="text-2xl font-black mb-2 text-slate-800 tracking-tight">Importation des effectifs</h2>
+                <p class="text-slate-500 text-sm mb-8">Chargez le fichier CSV de vos collaborateurs ou utilisez l'échantillon de démonstration.</p>
                 
-                <label class="flex flex-col items-center p-10 bg-slate-950 rounded-2xl border-2 border-dashed border-slate-800 hover:border-indigo-500 cursor-pointer transition">
-                    <span class="text-3xl mb-2">📄</span>
-                    <span class="text-sm font-semibold text-slate-300">Sélectionner un fichier CSV</span>
-                    <span class="text-xs text-slate-500 mt-1">Ou utilisez les données de démonstration</span>
+                <label class="flex flex-col items-center p-10 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-300 hover:border-indigo-500 hover:bg-indigo-50/20 cursor-pointer transition-all group mb-4">
+                    <span class="text-4xl mb-3">📄</span>
+                    <span class="text-sm font-bold text-slate-700 group-hover:text-indigo-600">Sélectionner un fichier CSV</span>
+                    <span class="text-xs text-slate-400 mt-1">Colonnes requises : Adresse, CP, Ville ou Lat/Lng</span>
                     <input type="file" id="csv-input" class="hidden" accept=".csv" />
                 </label>
 
-                <button id="btn-demo-csv" onclick="window.App.loadDemoData()" class="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg text-slate-300 transition">
-                    ⚡ Utiliser 50 employés de démo (Île-de-France)
+                <button id="btn-demo-csv" onclick="window.App.loadDemoData()" class="px-6 py-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-xl transition shadow-sm">
+                    ⚡ Charger 50 employés de démonstration (Île-de-France)
                 </button>
             </div>
         </section>
 
         <!-- STEP 2: GEOCODER -->
-        <section id="step-geo" class="step-view h-full flex items-center justify-center">
-            <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center max-w-sm">
-                <div class="animate-spin text-3xl mb-4">📍</div>
-                <h3 class="text-lg font-bold mb-1">Géocodage des Adresses...</h3>
-                <p class="text-xs text-slate-400">Positionnement spatial des collaborateurs sur la carte.</p>
+        <section id="step-geo" class="step-view">
+            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-12 max-w-lg mx-auto text-center">
+                <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-bounce">
+                    📍
+                </div>
+                <h3 class="text-xl font-extrabold text-slate-800 mb-2">Positionnement Géographique...</h3>
+                <p class="text-slate-500 text-xs">Marius géocode et calcule les coordonnées spatiales de l'entreprise et de ses salariés.</p>
             </div>
         </section>
 
         <!-- STEP BBOX: BBOX OPTIMIZATION (IGN GEOPLATEFORME) -->
-        <section id="step-bbox" class="step-view h-full relative">
-            <!-- Map Layer -->
-            <div id="bboxMap" class="w-full h-full z-0"></div>
+        <section id="step-bbox" class="step-view">
+            <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 flex flex-col gap-4">
+                
+                <!-- ENTÊTE DE COMMANDE ET BANDEAU D'AVERTISSEMENT -->
+                <div class="flex flex-wrap items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                    <div class="flex items-center gap-3">
+                        <button id="btn-scan-bbox" onclick="window.BboxOptimizer.startScan()" class="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-100 transition flex items-center gap-2 active:scale-95">
+                            <span>🚀 Lancer le Scan & Optimiser la BBOX</span>
+                        </button>
+                        <div id="bbox-status-badge" class="hidden px-3 py-2 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs">
+                            Prêt
+                        </div>
+                    </div>
 
-            <!-- Header Controls Overlay -->
-            <div class="absolute top-4 left-4 z-10 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md p-2 rounded-2xl border border-slate-800 shadow-xl">
-                <button id="btn-scan-bbox" onclick="window.BboxOptimizer.startScan()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition flex items-center gap-2">
-                    <span>🚀 Lancer le Scan & Optimiser BBOX</span>
-                </button>
-                <div id="bbox-status-badge" class="hidden px-3 py-1.5 rounded-xl bg-slate-950 text-xs text-slate-400 border border-slate-800">
-                    Prêt
+                    <!-- Alerte Volume critique (> 1M d'entités) -->
+                    <div id="volume-warning" class="hidden bg-amber-50 text-amber-800 px-4 py-2 rounded-xl border border-amber-200 font-bold text-xs items-center gap-2">
+                        ⚠️ Volume critique (&gt; 1,000,000 tronçons) : Risque de lenteur.
+                    </div>
                 </div>
-            </div>
 
-            <!-- Warning Banner for High Entity Count (> 1,000,000) -->
-            <div id="volume-warning" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-amber-500/90 backdrop-blur text-slate-950 px-4 py-2 rounded-xl font-bold text-xs shadow-2xl items-center gap-2 border border-amber-300">
-                ⚠️ Volume critique (> 1M tronçons de route IGN) : Risque de lenteur.
-            </div>
+                <!-- CONTENEUR CARTE + POPUPS FLOTTANTES À DROITE -->
+                <div class="relative w-full h-[620px] rounded-2xl overflow-hidden border border-slate-200">
+                    
+                    <!-- Carte Leaflet -->
+                    <div id="bboxMap" class="w-full h-full z-0"></div>
 
-            <!-- RIGHT SIDE POPUPS CONTAINER FOR SCENARIOS -->
-            <div id="bbox-popups-container" class="absolute top-4 right-4 z-20 w-80 max-h-[calc(100vh-100px)] overflow-y-auto custom-scrollbar space-y-3 pointer-events-auto">
-                <!-- Dynamic cards with 3 essential metrics will be inserted here -->
+                    <!-- VOLET DROIT DE POPUPS SCÉNARIOS -->
+                    <div id="bbox-popups-container" class="absolute top-4 right-4 z-[1000] w-80 max-h-[580px] overflow-y-auto custom-scrollbar space-y-3 pointer-events-auto pr-1">
+                        <!-- Pop-ups dynamiques injectées via BboxOptimizer.js -->
+                    </div>
+
+                </div>
             </div>
         </section>
 
         <!-- STEP 3: ROUTE API -->
-        <section id="step-route" class="step-view h-full p-8 flex items-center justify-center">
-            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-lg w-full text-center">
-                <h3 class="text-xl font-bold mb-4">Moteur de Calcul d'Itinéraires (router.js)</h3>
-                <div id="route-logs" class="bg-slate-950 border border-slate-800 p-4 rounded-xl font-mono text-xs text-teal-400 h-48 overflow-y-auto text-left leading-relaxed">
+        <section id="step-route" class="step-view">
+            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 max-w-2xl mx-auto">
+                <h3 class="text-xl font-black mb-2 text-slate-800">Moteur de Calcul d'Itinéraires (router.js)</h3>
+                <p class="text-slate-500 text-xs mb-6">Réception de l'emprise optimisée BBOX et calcul des trajets réseau.</p>
+                <div id="route-logs" class="bg-slate-900 text-teal-400 p-5 rounded-2xl font-mono text-xs h-56 overflow-y-auto text-left leading-relaxed shadow-inner">
                     > En attente d'emprise BBOX...
                 </div>
             </div>
         </section>
 
         <!-- STEP 4: DASHBOARD & MAP -->
-        <section id="step-map" class="step-view h-full p-6">
-            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 h-full flex flex-col justify-between text-center">
-                <h2 class="text-2xl font-bold text-emerald-400">Analyse Cartographique Finalisée</h2>
-                <p class="text-xs text-slate-400">Emprise BBOX optimisée et routes calculées avec succès.</p>
-                <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800 text-xs text-slate-300 font-mono">
-                    Session active : <span id="session-info" class="text-indigo-400 font-bold">Marius</span>
+        <section id="step-map" class="step-view">
+            <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 p-8 text-center max-w-2xl mx-auto">
+                <div class="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 font-black text-2xl">
+                    ✓
+                </div>
+                <h2 class="text-2xl font-black text-slate-800 mb-2">Analyse Cartographique Terminée</h2>
+                <p class="text-slate-500 text-xs mb-6">Emprise BBOX validée et itinéraires calculés avec succès.</p>
+                <div class="bg-slate-50 rounded-2xl p-4 border border-slate-200 text-xs text-slate-600 font-mono">
+                    Session active : <span id="session-info" class="text-indigo-600 font-bold">Marius</span>
                 </div>
             </div>
         </section>
+
+        <!-- Signature Portfolio -->
+        <div class="signature">
+            <a href="https://mariusbrion.github.io/portfolio/" target="_blank">
+                <span style="font-weight:500">Conçu & développé par</span> 
+                <span style="font-weight:800;color:#4f46e5;margin-left:4px">Marius Brion</span>
+            </a>
+        </div>
 
     </main>
 
