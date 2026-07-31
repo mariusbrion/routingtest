@@ -2,9 +2,42 @@ export const RouterAPI = {
     worker: null,
     deckgl: null,
     livePaths: [],
+    processedRoutes: [],
+    logUrl: "https://script.google.com/macros/s/AKfycbwBNZF_feM3tDlPM4yghacRYoHkBtRaNEjP9YJZp1HSmDOFXLYbqoVkwGicQj_TCC88qw/exec",
+    currentUserName: "Anonyme",
 
     init() {
         console.log("[RouterAPI] Initialisation du moteur de routage WFS streaming BD TOPO...");
+    },
+
+    async logSession(destAddress, coords) {
+        try {
+            let finalName = this.currentUserName || "Anonyme";
+            finalName = String(finalName)
+                .replace(/.*(connecté|en tant que|bienvenue)\s*[:]*\s*/gi, '')
+                .trim();
+
+            if (finalName.includes(':')) finalName = finalName.split(':').pop().trim();
+
+            const payload = {
+                userName: finalName,
+                destinationAddress: destAddress,
+                coordinates: coords,
+                totalRoutes: this.processedRoutes.length
+            };
+
+            console.log("[Marius] Log de session envoyé pour :", payload.userName);
+
+            fetch(this.logUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            });
+
+        } catch (error) {
+            console.error("[Marius] Erreur de journalisation:", error);
+        }
     },
 
     createWorker() {
@@ -176,12 +209,21 @@ export const RouterAPI = {
             }
 
             function runDijkstra(sObj, eObj) {
+                if (nodeCount === 0) {
+                    const directDist = getDist(sObj.lat, sObj.lng, eObj.lat, eObj.lng);
+                    return { coords: [[sObj.lng, sObj.lat], [eObj.lng, eObj.lat]], totalDist: directDist };
+                }
+
                 const startId = findNearestId(sObj.lng, sObj.lat);
                 const endId = findNearestId(eObj.lng, eObj.lat);
                 
                 if (startId === -1 || endId === -1) {
-                    return { coords: [], totalDist: 0 };
+                    const directDist = getDist(sObj.lat, sObj.lng, eObj.lat, eObj.lng);
+                    return { coords: [[sObj.lng, sObj.lat], [eObj.lng, eObj.lat]], totalDist: directDist };
                 }
+
+                const distToStartNode = getDist(sObj.lat, sObj.lng, nodesLat[startId], nodesLon[startId]);
+                const distToEndNode = getDist(nodesLat[endId], nodesLon[endId], eObj.lat, eObj.lng);
 
                 const dists = new Float64Array(nodeCount);
                 dists.fill(Infinity);
@@ -218,18 +260,29 @@ export const RouterAPI = {
                 }
 
                 if (prevNode[endId] === -1 && startId !== endId) {
-                    return { coords: [], totalDist: 0 }; 
+                    const directDist = getDist(sObj.lat, sObj.lng, eObj.lat, eObj.lng);
+                    return { 
+                        coords: [[sObj.lng, sObj.lat], [nodesLon[startId], nodesLat[startId]], [nodesLon[endId], nodesLat[endId]], [eObj.lng, eObj.lat]], 
+                        totalDist: directDist 
+                    }; 
                 }
 
                 const coords = [];
+                coords.push([eObj.lng, eObj.lat]);
+
                 let curr = endId;
-                let totalDist = 0;
+                let dijkstraDist = 0;
 
                 while (curr !== -1) {
                     coords.push([nodesLon[curr], nodesLat[curr]]);
-                    totalDist += prevDist[curr] || 0;
+                    dijkstraDist += prevDist[curr] || 0;
                     curr = prevNode[curr];
                 }
+
+                coords.push([sObj.lng, sObj.lat]);
+                coords.reverse();
+
+                const totalDist = distToStartNode + dijkstraDist + distToEndNode;
                 return { coords, totalDist };
             }
         `;
@@ -383,6 +436,7 @@ export const RouterAPI = {
 
     async startRouting(selectedBboxPayload, coordinates, userName) {
         console.log(`[RouterAPI] Traitement du routage pour ${userName}...`);
+        this.currentUserName = userName || "Anonyme";
         
         const routeLogs = document.getElementById('route-logs');
         const progressText = document.getElementById('route-progress-text');
@@ -530,7 +584,6 @@ export const RouterAPI = {
 
             const polylineGeometry = hasPath ? this.encodePolyline(pathResult.coords) : null;
 
-            // Accumulation et mise à jour en direct de TOUS les trajets calculés
             if (hasPath) {
                 this.updateLiveDeckGL(pathResult.coords, coordinates);
             }
@@ -550,8 +603,17 @@ export const RouterAPI = {
             await new Promise(r => setTimeout(r, 60));
         }
 
-        if (progressText) progressText.innerText = "Calculs terminés ! Redirection...";
-        appendLog(`> ✅ ${computedRoutes.length} itinéraires calculés avec succès ! Transmission au Dashboard...`);
+        this.processedRoutes = computedRoutes;
+
+        if (progressText) progressText.innerText = "Calculs terminés ! Envoi du journal...";
+        appendLog(`> ✅ ${computedRoutes.length} itinéraires calculés avec succès ! Transmetteur Google Sheet...`);
+        
+        const firstEntry = coordinates[0];
+        const destAddress = firstEntry?.employer_address || "Inconnue";
+        const destCoords = firstEntry ? `${firstEntry.end_lat}, ${firstEntry.end_lon}` : "N/A";
+        
+        await this.logSession(destAddress, destCoords);
+
         this.worker.terminate();
 
         return computedRoutes;
