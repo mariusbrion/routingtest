@@ -287,10 +287,24 @@
 
         <!-- STEP 3: ROUTE API -->
         <section id="step-route" class="step-view">
-            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 max-w-2xl mx-auto">
-                <h3 class="text-xl font-black mb-2 text-slate-800">Calcul du Réseau (router_api.js)</h3>
-                <p class="text-slate-500 text-xs mb-6">Emprise BBOX transmise avec succès. Génération des itinéraires...</p>
-                <div id="route-logs" class="bg-slate-900 text-teal-400 p-5 rounded-2xl font-mono text-xs h-56 overflow-y-auto text-left leading-relaxed shadow-inner">
+            <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-w-5xl mx-auto">
+                <div class="p-6 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-xl font-black text-slate-800">Calcul du Réseau &amp; Trajectoires En Direct</h3>
+                        <p class="text-slate-500 text-xs mt-1">Calcul Dijkstra via Web Worker et rendu cartographique Deck.gl en temps réel.</p>
+                    </div>
+                    <div id="route-progress-badge" class="px-4 py-2 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold text-xs flex items-center gap-2">
+                        <span class="animate-spin text-indigo-600">⏳</span>
+                        <span id="route-progress-text">Initialisation...</span>
+                    </div>
+                </div>
+
+                <!-- CARTE DECK.GL INTERACTIVE EN TEMPS RÉEL -->
+                <div class="relative w-full h-[450px] bg-slate-900">
+                    <div id="route-deck-container" class="w-full h-full"></div>
+                </div>
+
+                <div id="route-logs" class="bg-slate-900 text-teal-400 p-4 font-mono text-xs h-32 overflow-y-auto text-left leading-relaxed shadow-inner border-t border-slate-800">
                     > Transmetteur BBOX initialisé...
                 </div>
             </div>
