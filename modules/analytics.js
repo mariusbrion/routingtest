@@ -244,23 +244,45 @@ export const Analytics = {
 
             doc.setFontSize(10);
             doc.setTextColor(100, 100, 100);
-            doc.text(`Collaborateurs analysés : ${this.appState.routes.length}`, margin, 35);
+            doc.setFont("helvetica", "normal");
+            
+            const geocodeStats = this.appState.geocodeStats;
+            let effectifText = `Collaborateurs analysés : ${this.appState.routes.length}`;
+            if (geocodeStats && geocodeStats.failedCount > 0) {
+                effectifText += ` (${geocodeStats.successRate}% de l'effectif source)`;
+            }
+            doc.text(effectifText, margin, 35);
+
+            let chartStartY = 45;
+
+            // Mention spécifique si adresses non géocodées
+            if (geocodeStats && geocodeStats.failedCount > 0) {
+                doc.setFont("helvetica", "italic");
+                doc.setFontSize(8);
+                doc.setTextColor(225, 29, 72);
+                const failNotice = `* Note de méthode : L'analyse porte sur ${geocodeStats.successRate}% de l'effectif (${geocodeStats.geocodedCount}/${geocodeStats.totalInput} salariés). ${geocodeStats.failedCount} adresse(s) n'ont pas pu être géocodées par la Base Adresse Nationale (BAN) et ont été exclues.`;
+                const splitNotice = doc.splitTextToSize(failNotice, pageWidth - (margin * 2));
+                doc.text(splitNotice, margin, 42);
+                chartStartY = 55;
+            }
 
             const distStats = this.categorizeData('distance', false);
             const distImg = await this.generateInvisibleChart('Distances', distStats, '#6366f1');
-            doc.addImage(distImg, 'PNG', margin, 45, pageWidth - (margin*2), 70);
+            doc.addImage(distImg, 'PNG', margin, chartStartY, pageWidth - (margin*2), 70);
 
             const distComment = this.generateDistanceComment(distStats);
             doc.setFont("helvetica", "italic");
             doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
             const splitDist = doc.splitTextToSize(distComment, pageWidth - (margin*2));
-            doc.text(splitDist, margin, 125);
+            doc.text(splitDist, margin, chartStartY + 80);
             addFooter();
 
             // Page 2: Time
             doc.addPage();
             doc.setFontSize(14);
             doc.setFont("helvetica", "bold");
+            doc.setTextColor(79, 70, 229);
             doc.text("Analyse des Temps de Trajet", margin, 20);
 
             const timeStats = this.categorizeData('time', false);
@@ -270,12 +292,17 @@ export const Analytics = {
 
             const timeComment = this.generateTimeComment(timeStats, timeBikeStats);
             const splitTime = doc.splitTextToSize(timeComment, pageWidth - (margin*2));
+            doc.setFont("helvetica", "italic");
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
             doc.text(splitTime, margin, 105);
             addFooter();
 
             // Page 3: Map Capture
             doc.addPage();
             doc.setFontSize(14);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(79, 70, 229);
             doc.text("Carte de Chaleur des Flux", margin, 20);
 
             const mapImg = MapDisplay.getMapImage();
