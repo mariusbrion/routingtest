@@ -1,9 +1,4 @@
-/
 
-main.js - Orchestrateur Central Marius
-
-Intègre le module BBOX Optimizer et transmet l'emprise à router_api.js
-*/
 
 import { BboxOptimizer } from './modules/bbox_optimizer.js';
 import { RouterAPI } from './modules/router_api.js';
