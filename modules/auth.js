@@ -1,8 +1,3 @@
-/**
- * modules/auth.js
- * Gère l'authentification via l'API Google Apps Script.
- */
-
 export const Auth = {
     apiUrl: "https://script.google.com/macros/s/AKfycbyFxif6QkH3iobmoh-KPdpbo7slmtwQnhQLt9kRnBIEzEnjgmkFYIFASAldH2Puxl8Z/exec",
     
@@ -22,9 +17,6 @@ export const Auth = {
         }
     },
 
-    /**
-     * Procédure de connexion
-     */
     async handleLogin() {
         const password = document.getElementById('auth-password').value;
         const btn = document.getElementById('btn-login');
@@ -32,14 +24,11 @@ export const Auth = {
 
         if (!password) return;
 
-        // UI Loading state
         btn.disabled = true;
         btn.innerHTML = `<span class="animate-pulse">Vérification...</span>`;
         if (errorMsg) errorMsg.classList.add('hidden');
 
         try {
-            // Note: On utilise 'fetch' avec POST. 
-            // Pour lire la réponse d'un script Google, le mode 'cors' est nécessaire.
             const response = await fetch(this.apiUrl, {
                 method: 'POST',
                 body: JSON.stringify({ password: password })
@@ -48,10 +37,6 @@ export const Auth = {
             const result = await response.json();
 
             if (result.status === "success") {
-                console.log(`[Auth] Réponse brute userName:`, result.userName);
-                console.log(`[Auth] Bienvenue ${result.userName}`);
-                
-                // On passe à l'étape suivante avec les infos utilisateur
                 window.dispatchEvent(new CustomEvent('nextStep', {
                     detail: { 
                         data: { 
@@ -69,7 +54,7 @@ export const Auth = {
             this.showError("Erreur de connexion au serveur d'authentification.");
         } finally {
             btn.disabled = false;
-            btn.innerHTML = "Se connecter";
+            btn.innerHTML = "Accéder au Système";
         }
     },
 
