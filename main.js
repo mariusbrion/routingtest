@@ -13,6 +13,7 @@ export const App = {
         userName: null,
         rawData: null,
         coordinates: null,      // Géocodage réel BAN Batch
+        geocodeStats: null,     // Métriques d'adresses géocodées / non retrouvées
         selectedBbox: null,     // Emprise BBOX optimisée
         routes: null
     },
