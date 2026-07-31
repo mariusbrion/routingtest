@@ -1,21 +1,20 @@
 export const Geocoder = {
     processedData: [],
-    CHUNK_SIZE: 1000, // Découpage par lots de 1000 adresses max
+    CHUNK_SIZE: 1000,
 
     init() {},
 
     async startGeocoding(data) {
         this.processedData = [];
+        const totalInputRows = data.length;
         this.updateProgress(10, "Initialisation du géocodage BAN Batch...");
 
-        // Extract Unique Sites/Employers
         const employerMap = new Map();
         data.forEach(item => {
             const site = item['adresse employeur'];
             if (!employerMap.has(site)) employerMap.set(site, null);
         });
 
-        // 1. Géocodage des sites employeurs
         this.updateProgress(20, `Géocodage de ${employerMap.size} sites employeurs via BAN...`);
         const employerList = Array.from(employerMap.keys());
         const geocodedEmployers = await this.geocodeBatchBAN(employerList);
@@ -24,16 +23,13 @@ export const Geocoder = {
             employerMap.set(site, geocodedEmployers[i]);
         });
 
-        // 2. Géocodage des employés par lots
-        const totalEmp = data.length;
-        this.updateProgress(40, `Géocodage de ${totalEmp} employés en lots BAN Batch...`);
+        this.updateProgress(40, `Géocodage de ${totalInputRows} employés en lots BAN Batch...`);
 
         const employeeAddrs = data.map(item => item['adresse employé']);
         const geocodedEmployees = await this.geocodeBatchBAN(employeeAddrs, (pct) => {
             this.updateProgress(40 + Math.round(pct * 0.5), `Géocodage BAN Batch : ${Math.round(pct)}%...`);
         });
 
-        // 3. Assemblage des résultats
         let currentLetter = 'a';
         const employerGroupIds = new Map();
 
@@ -63,11 +59,28 @@ export const Geocoder = {
             });
         }
 
-        this.updateProgress(100, "Géocodage BAN Batch terminé ! Transmetteur BBOX...");
+        const geocodedCount = this.processedData.length;
+        const failedCount = Math.max(0, totalInputRows - geocodedCount);
+        const successRate = totalInputRows > 0 ? parseFloat(((geocodedCount / totalInputRows) * 100).toFixed(1)) : 100;
+
+        const geocodeStats = {
+            totalInput: totalInputRows,
+            geocodedCount,
+            failedCount,
+            successRate
+        };
+
+        this.updateProgress(100, `Géocodage terminé (${geocodedCount}/${totalInputRows} adresses localisées) ! Transmetteur BBOX...`);
         await new Promise(r => setTimeout(r, 600));
 
         window.dispatchEvent(new CustomEvent('nextStep', {
-            detail: { data: { coordinates: this.processedData }, next: 'step-bbox' }
+            detail: { 
+                data: { 
+                    coordinates: this.processedData,
+                    geocodeStats
+                }, 
+                next: 'step-bbox' 
+            }
         }));
     },
 
