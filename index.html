@@ -1,320 +1,162 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" class="h-full bg-slate-950 text-slate-100">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Marius | Analyse & Visualisation Mobilité</title>
+    <title>Marius | Analyse & Visualisation Mobilité avec BBOX IGN</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Mapbox GL JS & CSS -->
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Mapbox GL JS & Deck.gl -->
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
-
-    <!-- Deck.gl -->
     <script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
 
-    <!-- PapaParse -->
+    <!-- PapaParse & Chart.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-
-    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <!-- jsPDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
     <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
         .step-view { display: none; }
         .step-view.active { display: block; }
-        .progress-bar { transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
-        
-        #map-container {
-            width: 100%;
-            height: 600px;
-            position: relative;
-            background: #e2e8f0;
-            border-radius: 0 0 1rem 1rem;
-            overflow: hidden;
-        }
+        .progress-bar { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+        .leaflet-container { background-color: #020617; }
 
-        .log-terminal {
-            background: #1e293b;
-            color: #38bdf8;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 11px;
-            height: 100px;
-            overflow-y: auto;
-            padding: 10px;
-        }
+        /* Custom Markers Glow */
+        .company-marker { filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.9)); }
+        .emp-marker { filter: drop-shadow(0 0 4px rgba(34, 197, 94, 0.8)); }
+        .emp-excluded { filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.8)); opacity: 0.3; }
 
-        .stat-card {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            padding: 1rem;
-            border-radius: 0.75rem;
-            text-align: center;
-            transition: all 0.2s;
-        }
-        .stat-value {
-            font-size: 1.25rem;
-            font-weight: 800;
-            color: #4f46e5;
-        }
-        .stat-label {
-            font-size: 0.65rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            color: #64748b;
-            margin-top: 0.25rem;
-            line-height: 1.2;
-        }
-
-        #pdf-hidden-generator {
-            position: absolute;
-            top: -9999px;
-            left: -9999px;
-            visibility: hidden;
-        }
-
-        .btn-toggle.active {
-            background-color: #4f46e5;
-            color: white;
-            border-color: #4f46e5;
-        }
-
-        /* Signature & Branding Marius */
-        .signature {
-            text-align: center;
-            margin: 40px 0 20px 0;
-            animation: fadeInUp 0.8s ease-out forwards;
-        }
-        
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .signature a {
-            display: inline-block;
-            color: #475569;
-            font-size: 0.85rem;
-            letter-spacing: 0.5px;
-            padding: 10px 24px;
-            border-radius: 30px;
-            background: white;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-            border: 1px solid #e2e8f0;
-            text-decoration: none;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .signature a:hover {
-            border-color: #6366f1;
-            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-            transform: translateY(-2px);
-            color: #4f46e5;
-        }
-
-        /* Bandeau de session */
-        .session-banner {
-            background: #f0fdf4;
-            color: #166534;
-            padding: 12px 20px;
-            margin-bottom: 24px;
-            border-radius: 12px;
-            border: 1px solid #dcfce7;
-            display: none; /* Masqué par défaut, affiché via JS */
-            align-items: center;
-            justify-content: space-between;
-            animation: slideDown 0.5s ease-out forwards;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-        }
-
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        /* Scrollbar Popups */
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans min-h-screen flex flex-col">
+<body class="h-full flex flex-col overflow-hidden bg-slate-950 text-slate-100 select-none">
 
-    <!-- NAVIGATION ET PROGRESSION -->
-    <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-        <div class="max-w-6xl mx-auto px-4 py-4">
-            <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center space-x-2">
-                    <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black italic">
-                        M
-                    </div>
-                    <span class="text-xl font-bold tracking-tight text-slate-800">Marius</span>
-                </div>
-                <div id="step-indicator" class="text-xs font-bold uppercase tracking-widest text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">Accès</div>
+    <!-- NAVIGATION BAR -->
+    <nav class="h-14 bg-slate-900/90 backdrop-blur border-b border-slate-800/80 px-6 flex items-center justify-between shrink-0 z-50">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black italic shadow-lg shadow-indigo-900/50">
+                M
             </div>
-            <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                <div id="progress-bar" class="progress-bar h-full bg-indigo-600 w-0"></div>
+            <span class="text-base font-bold tracking-tight text-slate-100">Marius <span class="text-xs text-indigo-400 font-normal ml-1">| BBOX Geoplateforme IGN</span></span>
+        </div>
+        
+        <div class="flex items-center gap-4">
+            <div id="step-indicator" class="text-[11px] font-bold uppercase tracking-widest text-indigo-400 bg-indigo-950/60 border border-indigo-800/40 px-3 py-1 rounded-full">
+                Authentification
+            </div>
+            <div class="w-32 bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div id="progress-bar" class="progress-bar h-full bg-indigo-500 w-0"></div>
             </div>
         </div>
     </nav>
 
-    <main class="flex-grow max-w-6xl mx-auto w-full p-4 md:p-8">
+    <!-- APPLICATION MAIN CONTAINER -->
+    <main class="flex-1 relative overflow-hidden flex flex-col">
 
         <!-- STEP 0: AUTHENTIFICATION -->
-        <section id="step-auth" class="step-view active animate-in fade-in duration-500">
-            <div class="max-w-md mx-auto bg-white rounded-3xl shadow-2xl border border-slate-200 p-10 mt-12 text-center">
-                <div class="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-8 rotate-3 shadow-inner">
-                    <svg class="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        <section id="step-auth" class="step-view active h-full overflow-y-auto">
+            <div class="max-w-md mx-auto bg-slate-900/80 backdrop-blur-xl rounded-3xl border border-slate-800 p-8 mt-16 text-center shadow-2xl">
+                <div class="w-16 h-16 bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                    🔒
                 </div>
-                <h2 class="text-3xl font-black mb-3 text-slate-800 tracking-tight">Bonjour, c'est Marius.</h2>
-                <p class="text-slate-500 mb-10 text-sm leading-relaxed">Veuillez saisir votre code d'accès pour déverrouiller le diagnostic mobilité.</p>
-                
+                <h2 class="text-2xl font-bold mb-2 text-slate-100">Plateforme Marius</h2>
+                <p class="text-slate-400 text-xs mb-6">Saisissez votre code pour lancer le diagnostic géographique.</p>
                 <div class="space-y-4">
-                    <input type="password" id="auth-password" placeholder="••••••••" class="w-full p-4 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-center font-mono text-xl tracking-widest transition-all">
-                    <p id="auth-error" class="hidden text-xs text-rose-500 font-bold italic"></p>
-                    <button id="btn-login" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-200 active:scale-[0.98]">
-                        Démarrer l'analyse
+                    <input type="password" id="auth-password" placeholder="••••••••" value="demo" class="w-full p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-lg focus:border-indigo-500 outline-none text-slate-100">
+                    <button id="btn-login" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl transition shadow-lg shadow-indigo-950">
+                        Accéder au Système
                     </button>
                 </div>
             </div>
         </section>
 
         <!-- STEP 1: CSV PARSER -->
-        <section id="step-csv" class="step-view">
-            <!-- BANDEAU DE SESSION -->
-            <div id="session-banner" class="session-banner flex">
-                <div class="flex items-center space-x-3">
-                    <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
-                    </div>
-                    <span id="user-welcome" class="text-sm font-bold"></span>
-                </div>
-                <span class="text-[10px] uppercase font-black text-emerald-500/50">Session Active</span>
-            </div>
+        <section id="step-csv" class="step-view h-full overflow-y-auto p-8">
+            <div class="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center mt-10">
+                <h2 class="text-2xl font-bold mb-2">Importation des effectifs</h2>
+                <p class="text-xs text-slate-400 mb-6"><span id="user-welcome" class="text-indigo-400 font-medium"></span>, chargez la liste de vos collaborateurs.</p>
+                
+                <label class="flex flex-col items-center p-10 bg-slate-950 rounded-2xl border-2 border-dashed border-slate-800 hover:border-indigo-500 cursor-pointer transition">
+                    <span class="text-3xl mb-2">📄</span>
+                    <span class="text-sm font-semibold text-slate-300">Sélectionner un fichier CSV</span>
+                    <span class="text-xs text-slate-500 mt-1">Ou utilisez les données de démonstration</span>
+                    <input type="file" id="csv-input" class="hidden" accept=".csv" />
+                </label>
 
-            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-12 text-center">
-                <h2 class="text-3xl font-black mb-2 text-slate-800 tracking-tight">Importation des effectifs</h2>
-                <p class="text-slate-500 mb-10">Marius va traiter votre fichier pour identifier les potentiels cyclables.</p>
-                <div class="max-w-md mx-auto">
-                    <label class="flex flex-col items-center px-4 py-12 bg-slate-50 text-slate-400 rounded-2xl border-2 border-dashed border-slate-300 cursor-pointer hover:bg-white hover:border-indigo-400 hover:shadow-lg transition-all group">
-                        <svg class="w-14 h-14 mb-4 group-hover:text-indigo-500 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        <span class="text-sm font-bold text-slate-600">Sélectionner votre fichier CSV</span>
-                        <input type="file" id="csv-input" class="hidden" accept=".csv" />
-                    </label>
-                </div>
+                <button id="btn-demo-csv" onclick="window.App.loadDemoData()" class="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg text-slate-300 transition">
+                    ⚡ Utiliser 50 employés de démo (Île-de-France)
+                </button>
             </div>
         </section>
 
         <!-- STEP 2: GEOCODER -->
-        <section id="step-geo" class="step-view">
-            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-10">
-                <h2 class="text-2xl font-bold mb-6 tracking-tight">Positionnement géographique...</h2>
-                <div class="flex items-center space-x-4 p-8 bg-indigo-50 rounded-2xl border border-indigo-100">
-                    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
-                    <p class="font-bold text-indigo-900">Marius place vos collaborateurs sur la carte.</p>
+        <section id="step-geo" class="step-view h-full flex items-center justify-center">
+            <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl text-center max-w-sm">
+                <div class="animate-spin text-3xl mb-4">📍</div>
+                <h3 class="text-lg font-bold mb-1">Géocodage des Adresses...</h3>
+                <p class="text-xs text-slate-400">Positionnement spatial des collaborateurs sur la carte.</p>
+            </div>
+        </section>
+
+        <!-- STEP BBOX: BBOX OPTIMIZATION (IGN GEOPLATEFORME) -->
+        <section id="step-bbox" class="step-view h-full relative">
+            <!-- Map Layer -->
+            <div id="bboxMap" class="w-full h-full z-0"></div>
+
+            <!-- Header Controls Overlay -->
+            <div class="absolute top-4 left-4 z-10 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md p-2 rounded-2xl border border-slate-800 shadow-xl">
+                <button id="btn-scan-bbox" onclick="window.BboxOptimizer.startScan()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg transition flex items-center gap-2">
+                    <span>🚀 Lancer le Scan & Optimiser BBOX</span>
+                </button>
+                <div id="bbox-status-badge" class="hidden px-3 py-1.5 rounded-xl bg-slate-950 text-xs text-slate-400 border border-slate-800">
+                    Prêt
                 </div>
+            </div>
+
+            <!-- Warning Banner for High Entity Count (> 1,000,000) -->
+            <div id="volume-warning" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-amber-500/90 backdrop-blur text-slate-950 px-4 py-2 rounded-xl font-bold text-xs shadow-2xl items-center gap-2 border border-amber-300">
+                ⚠️ Volume critique (> 1M tronçons de route IGN) : Risque de lenteur.
+            </div>
+
+            <!-- RIGHT SIDE POPUPS CONTAINER FOR SCENARIOS -->
+            <div id="bbox-popups-container" class="absolute top-4 right-4 z-20 w-80 max-h-[calc(100vh-100px)] overflow-y-auto custom-scrollbar space-y-3 pointer-events-auto">
+                <!-- Dynamic cards with 3 essential metrics will be inserted here -->
             </div>
         </section>
 
         <!-- STEP 3: ROUTE API -->
-        <section id="step-route" class="step-view">
-            <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-10">
-                <h2 class="text-2xl font-bold mb-6 tracking-tight">Ingénierie des itinéraires</h2>
-                <div class="bg-slate-900 text-emerald-400 p-8 rounded-2xl font-mono text-xs h-64 overflow-y-auto mb-6 shadow-inner" id="route-logs">> Marius calcule les trajets optimaux...</div>
+        <section id="step-route" class="step-view h-full p-8 flex items-center justify-center">
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-lg w-full text-center">
+                <h3 class="text-xl font-bold mb-4">Moteur de Calcul d'Itinéraires (router.js)</h3>
+                <div id="route-logs" class="bg-slate-950 border border-slate-800 p-4 rounded-xl font-mono text-xs text-teal-400 h-48 overflow-y-auto text-left leading-relaxed">
+                    > En attente d'emprise BBOX...
+                </div>
             </div>
         </section>
 
         <!-- STEP 4: DASHBOARD & MAP -->
-        <section id="step-map" class="step-view">
-            <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
-                
-                <!-- HEADER ACTIONS -->
-                <div class="p-8 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-6 items-center justify-between">
-                    <div class="flex gap-4 flex-grow max-w-2xl">
-                        <div class="flex-grow">
-                            <label class="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-widest">Nom du Site</label>
-                            <input type="text" id="input-site-name" placeholder="Ex: Campus A" class="w-full p-3 text-sm rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-500/10 outline-none">
-                        </div>
-                        <div class="flex-grow">
-                            <label class="block text-[10px] uppercase font-bold text-slate-500 mb-2 tracking-widest">Ville</label>
-                            <input type="text" id="input-city" placeholder="Ex: Lyon" class="w-full p-3 text-sm rounded-xl border border-slate-300 focus:ring-4 focus:ring-indigo-500/10 outline-none">
-                        </div>
-                    </div>
-                    <div class="flex gap-3">
-                        <button id="btn-cloud-save" class="bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl font-bold text-sm transition-all active:scale-95">
-                            Sauvegarder
-                        </button>
-                        <button id="pdfBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 shadow-lg shadow-indigo-100 active:scale-95">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            <span>Générer l'Audit</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- ANALYTICS DASHBOARD -->
-                <div id="analytics-dashboard" class="hidden bg-white p-10 border-b border-slate-200">
-                    <div class="max-w-4xl mx-auto">
-                        <div class="flex flex-wrap items-center justify-between gap-4 mb-10">
-                            <div class="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
-                                <button id="toggle-dist" class="btn-toggle active px-8 py-3 text-xs font-black rounded-xl transition-all uppercase tracking-wider">Distances</button>
-                                <button id="toggle-time" class="btn-toggle px-8 py-3 text-xs font-black rounded-xl transition-all uppercase tracking-wider">Temps</button>
-                            </div>
-                            <button id="bike-toggle" class="btn-toggle hidden px-6 py-3 bg-white border border-slate-200 text-xs font-black rounded-xl hover:bg-slate-50 transition-all uppercase tracking-wider shadow-sm">
-                                🚲 Assistance Électrique (-25%)
-                            </button>
-                        </div>
-
-                        <div class="mb-12">
-                            <h3 id="chart-title" class="text-center text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-8">Analyse de Distribution</h3>
-                            <div class="h-80 w-full relative">
-                                <canvas id="interactiveChart"></canvas>
-                            </div>
-                        </div>
-
-                        <div id="statsGrid" class="grid grid-cols-2 md:grid-cols-4 gap-6 mt-6"></div>
-                    </div>
-                </div>
-
-                <!-- MAP SECTION -->
-                <div class="relative">
-                    <div id="map-container"></div>
-                    <div class="absolute bottom-8 left-8 bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-5 border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 pointer-events-none">
-                        <div class="flex items-center gap-4 mb-3">
-                            <span class="w-3 h-3 rounded-full bg-[#2ecc71] shadow-lg shadow-emerald-200"></span> <span>Prox. immédiate (2km)</span>
-                        </div>
-                        <div class="flex items-center gap-4 mb-3">
-                            <span class="w-3 h-3 rounded-full bg-[#f1c40f] shadow-lg shadow-yellow-200"></span> <span>Zone cyclable (5km)</span>
-                        </div>
-                        <div class="flex items-center gap-4">
-                            <span class="w-3 h-3 rounded-full bg-[#e67e22] shadow-lg shadow-orange-200"></span> <span>Zone VAE (10km)</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="cloud-logs" class="log-terminal border-t border-slate-800">
-                    > Marius est prêt.
-                </div>
-                
-                <div class="p-5 bg-white flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
-                    <div class="flex items-center space-x-3">
-                        <span class="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span id="session-info">Moteur de calcul en ligne</span>
-                    </div>
-                    <button onclick="location.reload()" class="text-indigo-600 hover:text-indigo-800 underline transition-colors">Réinitialiser Marius</button>
+        <section id="step-map" class="step-view h-full p-6">
+            <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 h-full flex flex-col justify-between text-center">
+                <h2 class="text-2xl font-bold text-emerald-400">Analyse Cartographique Finalisée</h2>
+                <p class="text-xs text-slate-400">Emprise BBOX optimisée et routes calculées avec succès.</p>
+                <div class="bg-slate-950 rounded-2xl p-4 border border-slate-800 text-xs text-slate-300 font-mono">
+                    Session active : <span id="session-info" class="text-indigo-400 font-bold">Marius</span>
                 </div>
             </div>
         </section>
 
-        <!-- Signature Portfolio -->
-        <div class="signature">
-            <a href="https://mariusbrion.github.io/portfolio/" target="_blank">
-                <span style="font-weight:500">Conçu & développé par</span> 
-                <span style="font-weight:800;color:#4f46e5;margin-left:4px">Marius Brion</span>
-            </a>
-        </div>
-
     </main>
 
-    <div id="pdf-hidden-generator"></div>
     <script type="module" src="main.js"></script>
 </body>
 </html>
