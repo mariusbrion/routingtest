@@ -6,14 +6,14 @@ import { RouterAPI } from './modules/router_api.js';
 import { MapDisplay } from './modules/map_display.js';
 import { Analytics } from './modules/analytics.js';
 
-const App = {
+export const App = {
     appState: {
         currentStep: 'step-auth',
         isAuthenticated: false,
         userName: null,
         rawData: null,
-        coordinates: null,      // Géocodage réel { start_lat, start_lon, end_lat, end_lon, ... }
-        selectedBbox: null,     // Emprise BBOX validée
+        coordinates: null,      // Géocodage réel BAN Batch
+        selectedBbox: null,     // Emprise BBOX optimisée
         routes: null
     },
 
@@ -73,7 +73,6 @@ const App = {
 
             case 'step-bbox':
                 if (this.appState.coordinates) {
-                    // Transmet les salariés géocodés réels au module BBOX
                     BboxOptimizer.init('bboxMap', this.appState.coordinates, (selectedBboxPayload) => {
                         console.log("[App] BBOX retenue :", selectedBboxPayload);
                         this.handleNavigation({
@@ -97,7 +96,7 @@ const App = {
                                         next: 'step-map'
                                     }
                                 });
-                            }, 1000);
+                            }, 800);
                         });
                 }
                 break;
