@@ -164,7 +164,7 @@
             <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 max-w-4xl mx-auto">
                 <div class="text-center mb-8">
                     <h2 class="text-2xl font-black mb-2 text-slate-800 tracking-tight">Importation & Sélection des Colonnes</h2>
-                    <p class="text-slate-500 text-sm">Sélectionnez votre fichier CSV pour associer librement les colonnes constituant les adresses.</p>
+                    <p class="text-slate-500 text-sm">Sélectionnez votre fichier CSV pour associer les colonnes constituant les adresses.</p>
                 </div>
                 
                 <div id="csv-upload-box" class="mb-6">
@@ -176,40 +176,55 @@
                     </label>
                 </div>
 
-                <!-- Zone de prévisualisation et mapping (masquée par défaut) -->
+                <!-- Zone de prévisualisation et mapping -->
                 <div id="csv-preview-container" class="hidden space-y-6 border-t border-slate-200 pt-6">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
-                            <span>👀 Aperçu des données</span>
-                            <span id="csv-row-count" class="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-600"></span>
-                        </h3>
-                    </div>
-
-                    <!-- Tableau d'aperçu des 5 premières lignes -->
-                    <div class="overflow-x-auto border border-slate-200 rounded-xl max-h-48 custom-scrollbar">
-                        <table id="csv-preview-table" class="w-full text-xs text-left text-slate-600">
-                            <!-- Injecté par CSVParser -->
-                        </table>
-                    </div>
-
-                    <!-- Sélecteur de colonnes à fusionner -->
+                    
+                    <!-- 1. Sélecteur de colonnes à fusionner -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-5 rounded-2xl border border-slate-200">
                         <div>
                             <label class="block text-xs font-extrabold uppercase tracking-wider text-indigo-900 mb-2">
-                                🏠 Adresse Employé (Cochez les colonnes à fusionner)
+                                🏠 Adresse Employé (Colonnes à fusionner)
                             </label>
-                            <div id="emp-cols-container" class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
+                            <div id="emp-cols-container" class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
                                 <!-- Checkboxes colonnes employé -->
                             </div>
                         </div>
 
                         <div>
                             <label class="block text-xs font-extrabold uppercase tracking-wider text-indigo-900 mb-2">
-                                🏢 Adresse Employeur (Cochez les colonnes à fusionner)
+                                🏢 Adresse Employeur (Colonnes à fusionner)
                             </label>
-                            <div id="site-cols-container" class="space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
+                            <div id="site-cols-container" class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
                                 <!-- Checkboxes colonnes employeur -->
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. APERÇU DES ADRESSES COMPOSÉES EN TEMPS RÉEL -->
+                    <div class="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 space-y-2 text-xs">
+                        <div class="font-extrabold text-indigo-900 uppercase tracking-wide text-[10px]">✨ Aperçu dynamique des adresses assemblées :</div>
+                        <div class="flex items-center gap-2 text-slate-700 font-mono">
+                            <span class="font-bold text-indigo-600">🏠 Employé :</span>
+                            <span id="preview-assembled-emp" class="bg-white px-2 py-1 rounded border border-indigo-200 truncate flex-1 font-semibold text-slate-800">Sélectionnez au moins une colonne</span>
+                        </div>
+                        <div class="flex items-center gap-2 text-slate-700 font-mono">
+                            <span class="font-bold text-indigo-600">🏢 Employeur :</span>
+                            <span id="preview-assembled-site" class="bg-white px-2 py-1 rounded border border-indigo-200 truncate flex-1 font-semibold text-slate-800">Sélectionnez au moins une colonne</span>
+                        </div>
+                    </div>
+
+                    <!-- 3. Tableau d'aperçu des 5 premières lignes -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
+                                <span>👀 Aperçu du fichier source</span>
+                                <span id="csv-row-count" class="text-[10px] font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-600"></span>
+                            </h3>
+                        </div>
+                        <div class="overflow-x-auto border border-slate-200 rounded-xl max-h-40 custom-scrollbar">
+                            <table id="csv-preview-table" class="w-full text-xs text-left text-slate-600">
+                                <!-- Injecté par CSVParser -->
+                            </table>
                         </div>
                     </div>
 
