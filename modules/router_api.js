@@ -1,5 +1,7 @@
 export const RouterAPI = {
     worker: null,
+    deckgl: null,
+    livePaths: [],
 
     init() {
         console.log("[RouterAPI] Initialisation du moteur de routage WFS streaming BD TOPO...");
@@ -236,10 +238,135 @@ export const RouterAPI = {
         return new Worker(URL.createObjectURL(blob));
     },
 
+    initLiveDeckGL(coordinates) {
+        const container = document.getElementById('route-deck-container');
+        if (!container) return;
+
+        this.livePaths = [];
+        
+        let avgLat = 48.8566, avgLng = 2.3522;
+        if (coordinates && coordinates.length > 0) {
+            avgLat = coordinates.reduce((sum, c) => sum + c.start_lat, 0) / coordinates.length;
+            avgLng = coordinates.reduce((sum, c) => sum + c.start_lon, 0) / coordinates.length;
+        }
+
+        const pointFeatures = [];
+        coordinates.forEach(c => {
+            pointFeatures.push({
+                type: "Feature",
+                properties: { type: 'depart' },
+                geometry: { type: "Point", coordinates: [c.start_lon, c.start_lat] }
+            });
+            pointFeatures.push({
+                type: "Feature",
+                properties: { type: 'arrivee' },
+                geometry: { type: "Point", coordinates: [c.end_lon, c.end_lat] }
+            });
+        });
+
+        const layers = [
+            new deck.TileLayer({
+                id: 'route-base-tiles',
+                data: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+                renderSubLayers: props => {
+                    const { bbox: { west, south, east, north } } = props.tile;
+                    return new deck.BitmapLayer(props, {
+                        data: null, image: props.data,
+                        bounds: [west, south, east, north]
+                    });
+                }
+            }),
+            new deck.GeoJsonLayer({
+                id: 'route-points-layer',
+                data: { type: "FeatureCollection", features: pointFeatures },
+                getFillColor: d => d.properties.type === 'arrivee' ? [239, 68, 68] : [34, 197, 94],
+                getPointRadius: 20,
+                pointRadiusMinPixels: 4
+            })
+        ];
+
+        if (!this.deckgl) {
+            this.deckgl = new deck.DeckGL({
+                container: 'route-deck-container',
+                initialViewState: { longitude: avgLng, latitude: avgLat, zoom: 11, pitch: 30, bearing: 0 },
+                controller: true,
+                layers: layers
+            });
+        } else {
+            this.deckgl.setProps({
+                layers,
+                initialViewState: { longitude: avgLng, latitude: avgLat, zoom: 11 }
+            });
+        }
+    },
+
+    updateLiveDeckGL(newPathCoords, coordinates) {
+        if (!this.deckgl) return;
+
+        if (newPathCoords && newPathCoords.length > 0) {
+            this.livePaths.push({ path: newPathCoords });
+        }
+
+        const pointFeatures = [];
+        coordinates.forEach(c => {
+            pointFeatures.push({
+                type: "Feature",
+                properties: { type: 'depart' },
+                geometry: { type: "Point", coordinates: [c.start_lon, c.start_lat] }
+            });
+            pointFeatures.push({
+                type: "Feature",
+                properties: { type: 'arrivee' },
+                geometry: { type: "Point", coordinates: [c.end_lon, c.end_lat] }
+            });
+        });
+
+        const layers = [
+            new deck.TileLayer({
+                id: 'route-base-tiles',
+                data: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+                renderSubLayers: props => {
+                    const { bbox: { west, south, east, north } } = props.tile;
+                    return new deck.BitmapLayer(props, {
+                        data: null, image: props.data,
+                        bounds: [west, south, east, north]
+                    });
+                }
+            }),
+            new deck.PathLayer({
+                id: 'route-live-glow',
+                data: this.livePaths,
+                getPath: d => d.path,
+                getColor: [99, 102, 241, 120],
+                getWidth: 8,
+                widthMinPixels: 4
+            }),
+            new deck.PathLayer({
+                id: 'route-live-line',
+                data: this.livePaths,
+                getPath: d => d.path,
+                getColor: [16, 185, 129, 240],
+                getWidth: 3,
+                widthMinPixels: 2
+            }),
+            new deck.GeoJsonLayer({
+                id: 'route-points-layer',
+                data: { type: "FeatureCollection", features: pointFeatures },
+                getFillColor: d => d.properties.type === 'arrivee' ? [239, 68, 68] : [34, 197, 94],
+                getPointRadius: 20,
+                pointRadiusMinPixels: 4
+            })
+        ];
+
+        this.deckgl.setProps({ layers });
+    },
+
     async startRouting(selectedBboxPayload, coordinates, userName) {
         console.log(`[RouterAPI] Traitement du routage pour ${userName}...`);
         
         const routeLogs = document.getElementById('route-logs');
+        const progressText = document.getElementById('route-progress-text');
+
         const appendLog = (msg) => {
             if (routeLogs) {
                 routeLogs.innerHTML += `\n${msg}`;
@@ -248,9 +375,12 @@ export const RouterAPI = {
         };
 
         if (routeLogs) routeLogs.innerHTML = `> Utilisateur : ${userName}`;
+        if (progressText) progressText.innerText = "Téléchargement BD TOPO WFS...";
+
+        // Initialisation de la carte Deck.gl temps réel
+        this.initLiveDeckGL(coordinates);
 
         const bbox = selectedBboxPayload.bbox;
-        // BBOX formatting for IGN GeoPF WFS 2.0.0
         const bboxString = selectedBboxPayload.wfsBboxString || `${bbox.minLat.toFixed(6)},${bbox.minLng.toFixed(6)},${bbox.maxLat.toFixed(6)},${bbox.maxLng.toFixed(6)},urn:ogc:def:crs:EPSG::4326`;
 
         appendLog(`> Emprise BBOX transmise : ${bboxString}`);
@@ -291,7 +421,6 @@ export const RouterAPI = {
                     const receivedCount = data.features.length;
                     totalReceivedFeatures += receivedCount;
 
-                    // Pushes chunk immediately to Worker thread in masked time
                     this.worker.postMessage({ type: 'BUILD_CHUNK', data: data.features });
                     appendLog(`> [Paquet #${callCount}] ${receivedCount} tronçons transmis au Worker (Total: ${totalReceivedFeatures})...`);
 
@@ -301,7 +430,6 @@ export const RouterAPI = {
                         startIndex += chunkSize;
                     }
                 } else {
-                    // Fallback try with longitude-first order if first packet returns empty
                     if (callCount === 1 && totalReceivedFeatures === 0) {
                         const altBboxStr = `${bbox.minLng.toFixed(6)},${bbox.minLat.toFixed(6)},${bbox.maxLng.toFixed(6)},${bbox.maxLat.toFixed(6)},EPSG:4326`;
                         url.searchParams.set('BBOX', altBboxStr);
@@ -311,22 +439,16 @@ export const RouterAPI = {
                             if (altData && altData.features && altData.features.length > 0) {
                                 totalReceivedFeatures += altData.features.length;
                                 this.worker.postMessage({ type: 'BUILD_CHUNK', data: altData.features });
-                                appendLog(`> [Paquet #${callCount}] ${altData.features.length} tronçons transmis au Worker (Total: ${totalReceivedFeatures})...`);
+                                appendLog(`> [Paquet #${callCount}] ${altData.features.length} tronçons transmis au Worker...`);
                                 if (altData.features.length >= chunkSize) {
                                     startIndex += chunkSize;
                                     isLastPage = false;
                                 } else {
                                     isLastPage = true;
                                 }
-                            } else {
-                                isLastPage = true;
-                            }
-                        } else {
-                            isLastPage = true;
-                        }
-                    } else {
-                        isLastPage = true;
-                    }
+                            } else { isLastPage = true; }
+                        } else { isLastPage = true; }
+                    } else { isLastPage = true; }
                 }
             } catch (err) {
                 console.error("[RouterAPI] Erreur WFS:", err);
@@ -353,7 +475,7 @@ export const RouterAPI = {
             this.worker.addEventListener('message', handleReady);
         });
 
-        appendLog(`> Calcul des itinéraires Dijkstra pour ${coordinates.length} salariés...`);
+        appendLog(`> Calcul des itinéraires Dijkstra en direct pour ${coordinates.length} salariés...`);
 
         const computedRoutes = [];
 
@@ -361,6 +483,10 @@ export const RouterAPI = {
             const emp = coordinates[i];
             const startObj = { lat: emp.start_lat, lng: emp.start_lon };
             const endObj = { lat: emp.end_lat, lng: emp.end_lon };
+
+            if (progressText) {
+                progressText.innerText = `Calcul itinéraire ${i + 1} / ${coordinates.length}...`;
+            }
 
             const pathResult = await new Promise((resolve) => {
                 const handleRoute = (e) => {
@@ -384,6 +510,11 @@ export const RouterAPI = {
 
             const polylineGeometry = hasPath ? this.encodePolyline(pathResult.coords) : null;
 
+            // Mettre à jour la visualisation Deck.gl en direct !
+            if (hasPath) {
+                this.updateLiveDeckGL(pathResult.coords, coordinates);
+            }
+
             computedRoutes.push({
                 id: emp.id || `route-${i + 1}`,
                 status: 'success',
@@ -395,8 +526,12 @@ export const RouterAPI = {
                 duration_min: durationMin,
                 geometry: polylineGeometry
             });
+
+            // Petite pause visuelle pour apprécier l'animation du tracé
+            await new Promise(r => setTimeout(r, 60));
         }
 
+        if (progressText) progressText.innerText = "Calculs terminés ! Redirection...";
         appendLog(`> ✅ ${computedRoutes.length} itinéraires calculés avec succès ! Transmission au Dashboard...`);
         this.worker.terminate();
 
