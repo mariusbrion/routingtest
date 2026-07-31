@@ -252,9 +252,9 @@ export const RouterAPI = {
                 if (c.end_lat < minLat) minLat = c.end_lat;
                 if (c.end_lat > maxLat) maxLat = c.end_lat;
                 if (c.start_lon < minLng) minLng = c.start_lon;
-                if (c.start_lon > maxLon) maxLon = c.start_lon;
+                if (c.start_lon > maxLng) maxLng = c.start_lon;
                 if (c.end_lon < minLng) minLng = c.end_lon;
-                if (c.end_lon > maxLng) maxLon = c.end_lon;
+                if (c.end_lon > maxLng) maxLng = c.end_lon;
             });
         } else {
             minLat = 48.8; maxLat = 48.9; minLng = 2.3; maxLng = 2.4;
