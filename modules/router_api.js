@@ -2,7 +2,7 @@ export const RouterAPI = {
     worker: null,
 
     init() {
-        console.log("[RouterAPI] Initialisation du moteur de routage WFS streaming...");
+        console.log("[RouterAPI] Initialisation du moteur de routage WFS streaming BD TOPO...");
     },
 
     createWorker() {
@@ -250,7 +250,8 @@ export const RouterAPI = {
         if (routeLogs) routeLogs.innerHTML = `> Utilisateur : ${userName}`;
 
         const bbox = selectedBboxPayload.bbox;
-        const bboxString = `${bbox.minLat.toFixed(6)},${bbox.minLng.toFixed(6)},${bbox.maxLat.toFixed(6)},${bbox.maxLng.toFixed(6)},EPSG:4326`;
+        // BBOX formatting for IGN GeoPF WFS 2.0.0
+        const bboxString = selectedBboxPayload.wfsBboxString || `${bbox.minLat.toFixed(6)},${bbox.minLng.toFixed(6)},${bbox.maxLat.toFixed(6)},${bbox.maxLng.toFixed(6)},urn:ogc:def:crs:EPSG::4326`;
 
         appendLog(`> Emprise BBOX transmise : ${bboxString}`);
         appendLog(`> Initialisation du Worker Dijkstra...`);
@@ -265,9 +266,8 @@ export const RouterAPI = {
         let callCount = 0;
         let totalReceivedFeatures = 0;
 
-        appendLog(`> Démarrage du streaming WFS IGN par paquets de ${chunkSize}...`);
+        appendLog(`> Démarrage du streaming WFS IGN BD TOPO par paquets de ${chunkSize}...`);
 
-        // BOUCLE STREAMING WFS : Envoi au Worker au fil de l'eau
         while (!isLastPage) {
             callCount++;
             
@@ -291,7 +291,7 @@ export const RouterAPI = {
                     const receivedCount = data.features.length;
                     totalReceivedFeatures += receivedCount;
 
-                    // POUSSE LE PAQUET AU WORKER EN TEMPS MASQUÉ
+                    // Pushes chunk immediately to Worker thread in masked time
                     this.worker.postMessage({ type: 'BUILD_CHUNK', data: data.features });
                     appendLog(`> [Paquet #${callCount}] ${receivedCount} tronçons transmis au Worker (Total: ${totalReceivedFeatures})...`);
 
@@ -301,7 +301,32 @@ export const RouterAPI = {
                         startIndex += chunkSize;
                     }
                 } else {
-                    isLastPage = true;
+                    // Fallback try with longitude-first order if first packet returns empty
+                    if (callCount === 1 && totalReceivedFeatures === 0) {
+                        const altBboxStr = `${bbox.minLng.toFixed(6)},${bbox.minLat.toFixed(6)},${bbox.maxLng.toFixed(6)},${bbox.maxLat.toFixed(6)},EPSG:4326`;
+                        url.searchParams.set('BBOX', altBboxStr);
+                        const altResp = await fetch(url.toString());
+                        if (altResp.ok) {
+                            const altData = await altResp.json();
+                            if (altData && altData.features && altData.features.length > 0) {
+                                totalReceivedFeatures += altData.features.length;
+                                this.worker.postMessage({ type: 'BUILD_CHUNK', data: altData.features });
+                                appendLog(`> [Paquet #${callCount}] ${altData.features.length} tronçons transmis au Worker (Total: ${totalReceivedFeatures})...`);
+                                if (altData.features.length >= chunkSize) {
+                                    startIndex += chunkSize;
+                                    isLastPage = false;
+                                } else {
+                                    isLastPage = true;
+                                }
+                            } else {
+                                isLastPage = true;
+                            }
+                        } else {
+                            isLastPage = true;
+                        }
+                    } else {
+                        isLastPage = true;
+                    }
                 }
             } catch (err) {
                 console.error("[RouterAPI] Erreur WFS:", err);
@@ -314,10 +339,9 @@ export const RouterAPI = {
             }
         }
 
-        appendLog(`> Fin de l'extraction WFS. Finalisation du graphe en mémoire...`);
+        appendLog(`> Fin de l'extraction WFS (${totalReceivedFeatures} tronçons). Finalisation du graphe...`);
         this.worker.postMessage({ type: 'BUILD_FINISH' });
 
-        // ATTENTE DE LA CONFIRMATION DU WORKER
         await new Promise((resolve) => {
             const handleReady = (e) => {
                 if (e.data.type === 'READY') {
@@ -329,7 +353,6 @@ export const RouterAPI = {
             this.worker.addEventListener('message', handleReady);
         });
 
-        // CALCUL DES ITINÉRAIRES POUR CHAQUE EMPLOYÉ
         appendLog(`> Calcul des itinéraires Dijkstra pour ${coordinates.length} salariés...`);
 
         const computedRoutes = [];
@@ -354,7 +377,9 @@ export const RouterAPI = {
             });
 
             const hasPath = pathResult && pathResult.coords && pathResult.coords.length > 0;
-            const distKm = hasPath ? parseFloat(pathResult.totalDist.toFixed(2)) : parseFloat((Math.sqrt(Math.pow((endObj.lat - startObj.lat) * 111, 2) + Math.pow((endObj.lng - startObj.lng) * 75, 2))).toFixed(2));
+            const distKm = hasPath 
+                ? parseFloat(pathResult.totalDist.toFixed(2)) 
+                : parseFloat((Math.sqrt(Math.pow((endObj.lat - startObj.lat) * 111, 2) + Math.pow((endObj.lng - startObj.lng) * 75, 2))).toFixed(2));
             const durationMin = parseFloat((distKm * 3.5).toFixed(1));
 
             const polylineGeometry = hasPath ? this.encodePolyline(pathResult.coords) : null;
@@ -372,7 +397,7 @@ export const RouterAPI = {
             });
         }
 
-        appendLog(`> ✅ ${computedRoutes.length} itinéraires calculés avec succès ! Transmisson au Dashboard...`);
+        appendLog(`> ✅ ${computedRoutes.length} itinéraires calculés avec succès ! Transmission au Dashboard...`);
         this.worker.terminate();
 
         return computedRoutes;
