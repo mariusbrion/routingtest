@@ -244,10 +244,29 @@ export const RouterAPI = {
 
         this.livePaths = [];
         
-        let avgLat = 48.8566, avgLng = 2.3522;
+        let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
         if (coordinates && coordinates.length > 0) {
-            avgLat = coordinates.reduce((sum, c) => sum + c.start_lat, 0) / coordinates.length;
-            avgLng = coordinates.reduce((sum, c) => sum + c.start_lon, 0) / coordinates.length;
+            coordinates.forEach(c => {
+                if (c.start_lat < minLat) minLat = c.start_lat;
+                if (c.start_lat > maxLat) maxLat = c.start_lat;
+                if (c.end_lat < minLat) minLat = c.end_lat;
+                if (c.end_lat > maxLat) maxLat = c.end_lat;
+                if (c.start_lon < minLng) minLng = c.start_lon;
+                if (c.start_lon > maxLon) maxLon = c.start_lon;
+                if (c.end_lon < minLng) minLng = c.end_lon;
+                if (c.end_lon > maxLng) maxLon = c.end_lon;
+            });
+        } else {
+            minLat = 48.8; maxLat = 48.9; minLng = 2.3; maxLng = 2.4;
+        }
+
+        const avgLat = (minLat + maxLat) / 2;
+        const avgLng = (minLng + maxLng) / 2;
+
+        const maxDiff = Math.max(Math.abs(maxLat - minLat), Math.abs(maxLng - minLng));
+        let zoom = 11;
+        if (maxDiff > 0) {
+            zoom = Math.max(6, Math.min(14, Math.floor(9.5 - Math.log2(maxDiff))));
         }
 
         const pointFeatures = [];
@@ -285,17 +304,18 @@ export const RouterAPI = {
             })
         ];
 
+        // Rendu 2D à plat (pitch: 0, bearing: 0) et cadrage dynamique
         if (!this.deckgl) {
             this.deckgl = new deck.DeckGL({
                 container: 'route-deck-container',
-                initialViewState: { longitude: avgLng, latitude: avgLat, zoom: 11, pitch: 30, bearing: 0 },
+                initialViewState: { longitude: avgLng, latitude: avgLat, zoom: zoom, pitch: 0, bearing: 0 },
                 controller: true,
                 layers: layers
             });
         } else {
             this.deckgl.setProps({
                 layers,
-                initialViewState: { longitude: avgLng, latitude: avgLat, zoom: 11 }
+                initialViewState: { longitude: avgLng, latitude: avgLat, zoom: zoom, pitch: 0, bearing: 0 }
             });
         }
     },
@@ -335,17 +355,17 @@ export const RouterAPI = {
             }),
             new deck.PathLayer({
                 id: 'route-live-glow',
-                data: this.livePaths,
+                data: [...this.livePaths],
                 getPath: d => d.path,
-                getColor: [99, 102, 241, 120],
+                getColor: [99, 102, 241, 140],
                 getWidth: 8,
                 widthMinPixels: 4
             }),
             new deck.PathLayer({
                 id: 'route-live-line',
-                data: this.livePaths,
+                data: [...this.livePaths],
                 getPath: d => d.path,
-                getColor: [16, 185, 129, 240],
+                getColor: [16, 185, 129, 255],
                 getWidth: 3,
                 widthMinPixels: 2
             }),
@@ -377,7 +397,7 @@ export const RouterAPI = {
         if (routeLogs) routeLogs.innerHTML = `> Utilisateur : ${userName}`;
         if (progressText) progressText.innerText = "Téléchargement BD TOPO WFS...";
 
-        // Initialisation de la carte Deck.gl temps réel
+        // Initialisation de la carte Deck.gl temps réel en 2D à plat
         this.initLiveDeckGL(coordinates);
 
         const bbox = selectedBboxPayload.bbox;
@@ -510,7 +530,7 @@ export const RouterAPI = {
 
             const polylineGeometry = hasPath ? this.encodePolyline(pathResult.coords) : null;
 
-            // Mettre à jour la visualisation Deck.gl en direct !
+            // Accumulation et mise à jour en direct de TOUS les trajets calculés
             if (hasPath) {
                 this.updateLiveDeckGL(pathResult.coords, coordinates);
             }
@@ -527,7 +547,6 @@ export const RouterAPI = {
                 geometry: polylineGeometry
             });
 
-            // Petite pause visuelle pour apprécier l'animation du tracé
             await new Promise(r => setTimeout(r, 60));
         }
 
