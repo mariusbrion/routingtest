@@ -68,22 +68,23 @@ export const CSVParser = {
         tableHtml += `</tbody>`;
         table.innerHTML = tableHtml;
 
+        // 2. Génération des checkboxes
         let empHtml = '';
         let siteHtml = '';
 
         this.headers.forEach((h, i) => {
-            const isEmpDefault = i < 3; // Par défaut coche les premières colonnes pour l'employé
+            const isEmpDefault = i < 3;
             const isSiteDefault = i >= 3;
 
             empHtml += `
                 <label class="flex items-center space-x-2 text-xs font-semibold text-slate-700 hover:text-indigo-600 cursor-pointer">
-                    <input type="checkbox" name="emp-col" value="${h}" ${isEmpDefault ? 'checked' : ''} class="rounded text-indigo-600 focus:ring-indigo-500">
+                    <input type="checkbox" name="emp-col" value="${h}" ${isEmpDefault ? 'checked' : ''} class="rounded text-indigo-600 focus:ring-indigo-500 emp-cb">
                     <span>${h}</span>
                 </label>`;
 
             siteHtml += `
                 <label class="flex items-center space-x-2 text-xs font-semibold text-slate-700 hover:text-indigo-600 cursor-pointer">
-                    <input type="checkbox" name="site-col" value="${h}" ${isSiteDefault ? 'checked' : ''} class="rounded text-indigo-600 focus:ring-indigo-500">
+                    <input type="checkbox" name="site-col" value="${h}" ${isSiteDefault ? 'checked' : ''} class="rounded text-indigo-600 focus:ring-indigo-500 site-cb">
                     <span>${h}</span>
                 </label>`;
         });
@@ -91,7 +92,29 @@ export const CSVParser = {
         empColsContainer.innerHTML = empHtml;
         siteColsContainer.innerHTML = siteHtml;
 
+        // Écouteurs pour mise à jour dynamique de la prévisualisation
+        empColsContainer.querySelectorAll('input').forEach(cb => cb.addEventListener('change', () => this.updateLiveAddressPreview()));
+        siteColsContainer.querySelectorAll('input').forEach(cb => cb.addEventListener('change', () => this.updateLiveAddressPreview()));
+
         if (previewContainer) previewContainer.classList.remove('hidden');
+
+        this.updateLiveAddressPreview();
+    },
+
+    updateLiveAddressPreview() {
+        const selectedEmpCols = Array.from(document.querySelectorAll('input[name="emp-col"]:checked')).map(cb => cb.value);
+        const selectedSiteCols = Array.from(document.querySelectorAll('input[name="site-col"]:checked')).map(cb => cb.value);
+
+        const firstRow = this.fullRows[0] || {};
+
+        const empPreviewText = selectedEmpCols.map(col => (firstRow[col] || '').toString().trim()).filter(Boolean).join(' ');
+        const sitePreviewText = selectedSiteCols.map(col => (firstRow[col] || '').toString().trim()).filter(Boolean).join(' ');
+
+        const empElem = document.getElementById('preview-assembled-emp');
+        const siteElem = document.getElementById('preview-assembled-site');
+
+        if (empElem) empElem.textContent = empPreviewText || "Aucune colonne sélectionnée";
+        if (siteElem) siteElem.textContent = sitePreviewText || "Aucune colonne sélectionnée";
     },
 
     processSelectedColumns() {
