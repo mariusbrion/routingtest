@@ -38,38 +38,89 @@ export const CarpoolingPotential = {
         return coordinates;
     },
 
-    computeRouteOverlap(routeA, routeB) {
-        const coordsA = routeA.geometry ? this.decodePolyline(routeA.geometry) : [[routeA.start_lon, routeA.start_lat], [routeA.end_lon, routeA.end_lat]];
-        const coordsB = routeB.geometry ? this.decodePolyline(routeB.geometry) : [[routeB.start_lon, routeB.start_lat], [routeB.end_lon, routeB.end_lat]];
+    preprocessRoute(route) {
+        let rawCoords = [];
+        if (route.geometry) {
+            rawCoords = this.decodePolyline(route.geometry);
+        } else if (route.start_lon && route.start_lat && route.end_lon && route.end_lat) {
+            rawCoords = [[route.start_lon, route.start_lat], [route.end_lon, route.end_lat]];
+        }
 
-        if (coordsA.length === 0 || coordsB.length === 0) return { sharedKm: 0, overlapRatioPct: 0 };
+        if (!rawCoords || rawCoords.length === 0) {
+            return { route, filteredCoords: [], bbox: null };
+        }
 
-        const employerLat = routeA.end_lat;
-        const employerLon = routeA.end_lon;
+        const employerLat = route.end_lat;
+        const employerLon = route.end_lon;
 
-        // Exclure les 500 derniers mètres avant l'entreprise (zone de convergence systématique)
-        const filteredA = coordsA.filter(p => this.haversineDistance(p[1], p[0], employerLat, employerLon) > 0.5);
-        const filteredB = coordsB.filter(p => this.haversineDistance(p[1], p[0], employerLat, employerLon) > 0.5);
+        // Exclure les points situés à moins de 500m de l'entreprise
+        const nonEmployerCoords = rawCoords.filter(p => this.haversineDistance(p[1], p[0], employerLat, employerLon) > 0.5);
 
-        if (filteredA.length === 0 || filteredB.length === 0) return { sharedKm: 0, overlapRatioPct: 0 };
+        // Sous-échantillonnage dynamique (~300m d'écartement)
+        const filteredCoords = [];
+        let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+        let prevPoint = null;
+
+        for (const p of nonEmployerCoords) {
+            const lat = p[1];
+            const lon = p[0];
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+            if (lon < minLon) minLon = lon;
+            if (lon > maxLon) maxLon = lon;
+
+            if (!prevPoint || this.haversineDistance(prevPoint[1], prevPoint[0], lat, lon) >= 0.3) {
+                filteredCoords.push(p);
+                prevPoint = p;
+            }
+        }
+
+        return {
+            route,
+            filteredCoords,
+            bbox: { minLat, maxLat, minLon, maxLon }
+        };
+    },
+
+    computeRouteOverlapPreprocessed(pA, pB) {
+        const coordsA = pA.filteredCoords;
+        const coordsB = pB.filteredCoords;
+
+        if (!coordsA || !coordsB || coordsA.length === 0 || coordsB.length === 0) {
+            return { sharedKm: 0, overlapRatioPct: 0 };
+        }
+
+        // Pré-filtrage rapide Bounding Box (tolérance 1km)
+        if (pA.bbox && pB.bbox) {
+            if (pA.bbox.maxLat + 0.01 < pB.bbox.minLat || pA.bbox.minLat - 0.01 > pB.bbox.maxLat ||
+                pA.bbox.maxLon + 0.01 < pB.bbox.minLon || pA.bbox.minLon - 0.01 > pB.bbox.maxLon) {
+                return { sharedKm: 0, overlapRatioPct: 0 };
+            }
+        }
 
         let sharedPointsCount = 0;
-        const thresholdKm = 0.35; // Rayon de proximité 350 mètres entre tronçons
+        const thresholdKm = 0.35; // Rayon 350m
 
-        filteredA.forEach(pA => {
-            const isNear = filteredB.some(pB => this.haversineDistance(pA[1], pA[0], pB[1], pB[0]) <= thresholdKm);
+        coordsA.forEach(ptA => {
+            const isNear = coordsB.some(ptB => this.haversineDistance(ptA[1], ptA[0], ptB[1], ptB[0]) <= thresholdKm);
             if (isNear) sharedPointsCount++;
         });
 
-        const ratioA = sharedPointsCount / filteredA.length;
-        const distA = parseFloat(routeA.distance_km || 0);
-        const distB = parseFloat(routeB.distance_km || 0);
+        const ratioA = sharedPointsCount / coordsA.length;
+        const distA = parseFloat(pA.route.distance_km || 0);
+        const distB = parseFloat(pB.route.distance_km || 0);
         const minDistance = Math.min(distA, distB);
 
         const sharedKm = parseFloat((minDistance * ratioA).toFixed(1));
         const overlapRatioPct = Math.round(ratioA * 100);
 
         return { sharedKm, overlapRatioPct };
+    },
+
+    computeRouteOverlap(routeA, routeB) {
+        const pA = this.preprocessRoute(routeA);
+        const pB = this.preprocessRoute(routeB);
+        return this.computeRouteOverlapPreprocessed(pA, pB);
     },
 
     analyzeCarpoolingData() {
@@ -80,17 +131,26 @@ export const CarpoolingPotential = {
 
         const longDistanceRoutes = carRoutes.filter(r => (parseFloat(r.distance_km) || 0) > 15);
 
-        // 1. Matrice des paires qualifiées (> 40% de trajet partagé ou domiciles proches < 5km)
+        // Pré-traitement unique des itinéraires
+        const processed = carRoutes.map(r => this.preprocessRoute(r));
+        const N = processed.length;
+
+        // Matrice d'overlap pré-calculée
+        const overlapMatrix = Array.from({ length: N }, () => new Array(N));
+
         const matchScores = [];
         const scoreDistribution = { high: 0, good: 0, moderate: 0, low: 0 };
 
-        for (let i = 0; i < carRoutes.length; i++) {
-            for (let j = i + 1; j < carRoutes.length; j++) {
+        for (let i = 0; i < N; i++) {
+            for (let j = i + 1; j < N; j++) {
                 const rA = carRoutes[i];
                 const rB = carRoutes[j];
 
                 const domicileDist = this.haversineDistance(rA.start_lat, rA.start_lon, rB.start_lat, rB.start_lon);
-                const { sharedKm, overlapRatioPct } = this.computeRouteOverlap(rA, rB);
+                const { sharedKm, overlapRatioPct } = this.computeRouteOverlapPreprocessed(processed[i], processed[j]);
+
+                overlapMatrix[i][j] = overlapRatioPct;
+                overlapMatrix[j][i] = overlapRatioPct;
 
                 // Classement pour histogramme
                 if (overlapRatioPct >= 80) scoreDistribution.high++;
@@ -114,20 +174,19 @@ export const CarpoolingPotential = {
         const visited = new Set();
         const macroCorridors = [];
 
-        for (let i = 0; i < carRoutes.length; i++) {
+        for (let i = 0; i < N; i++) {
             const rootEmp = carRoutes[i];
             if (visited.has(rootEmp.id)) continue;
 
             const corridorMembers = [rootEmp];
             visited.add(rootEmp.id);
 
-            for (let j = i + 1; j < carRoutes.length; j++) {
+            for (let j = i + 1; j < N; j++) {
                 const candidate = carRoutes[j];
                 if (visited.has(candidate.id)) continue;
 
-                // Membre du même corridor si domicile < 7km ou match routier > 40%
                 const domDist = this.haversineDistance(rootEmp.start_lat, rootEmp.start_lon, candidate.start_lat, candidate.start_lon);
-                const { overlapRatioPct } = this.computeRouteOverlap(rootEmp, candidate);
+                const overlapRatioPct = overlapMatrix[i][j] || 0;
 
                 if (domDist <= 7.0 || overlapRatioPct >= 40) {
                     corridorMembers.push(candidate);
@@ -141,13 +200,11 @@ export const CarpoolingPotential = {
                 const membersToProcess = [...corridorMembers];
 
                 while (membersToProcess.length >= 2) {
-                    // Prendre un groupe de 2 à 4 personnes
                     const crewSize = Math.min(4, membersToProcess.length);
                     const currentCrew = membersToProcess.splice(0, crewSize);
 
-                    // Calcul de la distance moyenne du sous-groupe
                     const avgDist = parseFloat((currentCrew.reduce((sum, m) => sum + parseFloat(m.distance_km || 0), 0) / currentCrew.length).toFixed(1));
-                    const avgMatchPct = 65 + Math.round(Math.random() * 25); // Score estimé du sous-groupe
+                    const avgMatchPct = 65 + Math.round(Math.random() * 25);
 
                     subCrews.push({
                         members: currentCrew,
@@ -157,7 +214,6 @@ export const CarpoolingPotential = {
                     });
                 }
 
-                // Estimation du centre géographique du corridor
                 const avgLat = corridorMembers.reduce((sum, m) => sum + m.start_lat, 0) / corridorMembers.length;
                 const avgLon = corridorMembers.reduce((sum, m) => sum + m.start_lon, 0) / corridorMembers.length;
 
