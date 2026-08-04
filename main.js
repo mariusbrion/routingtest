@@ -112,7 +112,11 @@ export const App = {
                     MapDisplay.render(this.appState);
                     Analytics.init(this.appState);
                     
-                    CarpoolingPotential.init(this.appState);
+                    try {
+                        CarpoolingPotential.init(this.appState);
+                    } catch (err) {
+                        console.error("[App] Erreur lors de l'initialisation du Covoiturage:", err);
+                    }
                     
                     const sess = document.getElementById('session-info');
                     if (sess) sess.innerText = this.appState.userName || "Marius Admin";
