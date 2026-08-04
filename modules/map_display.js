@@ -6,6 +6,13 @@ export const MapDisplay = {
     isCityValidated: false,
     displayMode: 'both', // 'heatmap' | 'flow' | 'both'
     
+    // Dynamic distance filter (km)
+    maxDistanceFilter: Infinity,
+    maxDistanceLimit: 50,
+
+    // Dynamic minimum flow filter (passages)
+    minFlowFilter: 1,
+
     // Configurable heatmap parameters
     heatmapSettings: {
         radius: 30,
@@ -18,12 +25,23 @@ export const MapDisplay = {
         visible: true
     },
 
+    // Dynamic quintile thresholds for flows
+    flowThresholds: [],
+
     render(state) {
         this.lastState = state;
         if (!state.routes || state.routes.length === 0) return;
 
         const logs = document.getElementById('cloud-logs');
         if (logs) logs.style.display = 'none';
+
+        // Calculate max distance present in dataset if not initialized
+        const allDistances = state.routes.map(r => parseFloat(r.distance_km) || 0);
+        const datasetMaxDist = Math.ceil(Math.max(...allDistances, 10));
+        if (this.maxDistanceFilter === Infinity) {
+            this.maxDistanceLimit = datasetMaxDist;
+            this.maxDistanceFilter = datasetMaxDist;
+        }
 
         this.initCityAutocomplete();
         this.initMapControls();
@@ -34,17 +52,23 @@ export const MapDisplay = {
             saveBtn.dataset.init = "true";
         }
 
+        // 1. Filter routes according to max distance slider
+        const activeRoutes = state.routes.filter(r => {
+            const dist = parseFloat(r.distance_km) || 0;
+            return dist <= this.maxDistanceFilter;
+        });
+
         const allTrajectoryPoints = [];
         const pointFeatures = [];
         const decodedRoutes = [];
 
-        // Extract employer destination coordinate to prevent destination stacking in heatmap
+        // Extract employer destination coordinate
         let companyCoords = null;
-        if (state.routes.length > 0 && state.routes[0].end_lon && state.routes[0].end_lat) {
-            companyCoords = [state.routes[0].end_lon, state.routes[0].end_lat];
+        if (activeRoutes.length > 0 && activeRoutes[0].end_lon && activeRoutes[0].end_lat) {
+            companyCoords = [activeRoutes[0].end_lon, activeRoutes[0].end_lat];
         }
 
-        state.routes.forEach(route => {
+        activeRoutes.forEach(route => {
             let coords = [];
             if (route.status === 'success' && route.geometry) {
                 coords = this.decodePolyline(route.geometry);
@@ -55,13 +79,13 @@ export const MapDisplay = {
             if (coords.length > 0) {
                 decodedRoutes.push(coords);
                 
-                // Sample route points without over-concentrating at the employer destination node
-                const sampled = this.samplePolylinePoints(coords, 0.03, companyCoords);
+                // Sample polyline points using logarithmic scaling to prevent destination saturation
+                const sampled = this.samplePolylinePointsLog(coords, 0.04, companyCoords);
                 sampled.forEach(p => allTrajectoryPoints.push(p));
 
                 pointFeatures.push({
                     type: "Feature",
-                    properties: { type: 'depart', id: route.id },
+                    properties: { type: 'depart', id: route.id, dist: route.distance_km },
                     geometry: { type: "Point", coordinates: [route.start_lon, route.start_lat] }
                 });
 
@@ -73,7 +97,12 @@ export const MapDisplay = {
             }
         });
 
+        // Compute segment frequencies and dynamic 20% quintile boundaries
         const { segments, maxPassages } = this.computeSegmentFrequencies(decodedRoutes);
+        this.flowThresholds = this.computeQuintileThresholds(segments);
+
+        // Filter segments by minimum flow threshold
+        const filteredSegments = segments.filter(s => s.count >= this.minFlowFilter);
 
         const isochroneFeatures = state.isochrones 
             ? [...state.isochrones].sort((a, b) => b.properties.range_km - a.properties.range_km) 
@@ -102,7 +131,7 @@ export const MapDisplay = {
             })
         ];
 
-        // 1. Heatmap Layer with expanded dispersion color gradient
+        // 1. Heatmap Layer with logarithmic weight scaling & smooth dispersion
         if (this.displayMode === 'heatmap' || this.displayMode === 'both') {
             layers.push(
                 new deck.HeatmapLayer({
@@ -111,36 +140,47 @@ export const MapDisplay = {
                     getPosition: d => d.coords,
                     getWeight: d => d.weight || 1,
                     radiusPixels: this.heatmapSettings.radius,
-                    intensity: 1.4,
+                    intensity: 1.2,
                     threshold: this.heatmapSettings.threshold,
                     colorRange: [
-                        [56, 189, 248, 40],   // Light Sky Blue halo
-                        [45, 212, 191, 120],  // Soft Teal
-                        [250, 204, 21, 180],  // Vibrant Yellow
-                        [249, 115, 22, 220],  // Bright Orange
-                        [220, 38, 38, 245],   // Crimson Red
-                        [153, 27, 27, 255]    // Deep Burgundy
+                        [56, 189, 248, 40],   // Sky Blue halo
+                        [45, 212, 191, 130],  // Soft Teal
+                        [250, 204, 21, 190],  // Yellow
+                        [249, 115, 22, 230],  // Orange
+                        [220, 38, 38, 250],   // Bright Crimson
+                        [153, 27, 27, 255]    // Burgundy
                     ]
                 })
             );
         }
 
-        // 2. Flow Path Layer with intuitive cold-to-hot palette
+        // 2. Flow Path Layer with dynamic 20% quintile threshold coloring
         if (this.displayMode === 'flow' || this.displayMode === 'both') {
             layers.push(
                 new deck.PathLayer({
                     id: 'routes-flow-layer',
-                    data: segments,
+                    data: filteredSegments,
                     getPath: d => d.path,
                     getColor: d => this.getSegmentColor(d.count),
                     getWidth: d => this.getSegmentWidth(d.count),
                     widthMinPixels: 2,
-                    pickable: true
+                    pickable: true,
+                    onClick: (info) => {
+                        if (info && info.object) {
+                            // Clicking on a flow segment filters out flows with count <= this segment
+                            this.minFlowFilter = info.object.count + 1;
+                            const inputMinFlow = document.getElementById('input-min-flow');
+                            if (inputMinFlow) inputMinFlow.value = this.minFlowFilter;
+                            const valMinFlow = document.getElementById('val-min-flow');
+                            if (valMinFlow) valMinFlow.innerText = `${this.minFlowFilter} passage(s)`;
+                            this.render(this.lastState);
+                        }
+                    }
                 })
             );
         }
 
-        // 3. Employee & Employer Points Layer (Toggleable size & visibility)
+        // 3. Employee & Employer Points Layer
         layers.push(
             new deck.GeoJsonLayer({
                 id: 'points-layer',
@@ -164,9 +204,13 @@ export const MapDisplay = {
                 glOptions: { preserveDrawingBuffer: true },
                 getTooltip: ({object}) => {
                     if (!object) return null;
-                    if (object.count) return `🔀 ${object.count} passage(s) de salarié(s)`;
+                    if (object.count) return `🔀 ${object.count} passage(s) de salarié(s)\n(Cliquer pour masquer les flux ≤ ${object.count})`;
                     if (object.properties && object.properties.range_km) return `Isochrone: ${object.properties.range_km} km`;
-                    if (object.properties && object.properties.type) return object.properties.type === 'arrivee' ? "🏢 Site Employeur" : "🏠 Départ Employé";
+                    if (object.properties && object.properties.type) {
+                        return object.properties.type === 'arrivee' 
+                            ? "🏢 Site Employeur" 
+                            : `🏠 Départ Employé (${object.properties.dist || '?'} km)`;
+                    }
                     return null;
                 }
             });
@@ -206,21 +250,91 @@ export const MapDisplay = {
         };
     },
 
-    // Intuitive Western palette: Light Blue -> Teal -> Yellow -> Orange -> Dark Red
+    /**
+     * Compute clean 20% quintile thresholds across all segment passage counts
+     */
+    computeQuintileThresholds(segments) {
+        if (!segments || segments.length === 0) {
+            return [
+                { min: 1, max: 1, color: [56, 189, 248, 190], width: 3, label: '1 passage' },
+                { min: 2, max: 3, color: [45, 212, 191, 210], width: 5, label: '2 - 3 passages' },
+                { min: 4, max: 6, color: [250, 204, 21, 230], width: 7, label: '4 - 6 passages' },
+                { min: 7, max: 10, color: [249, 115, 22, 245], width: 9, label: '7 - 10 passages' },
+                { min: 11, max: Infinity, color: [185, 28, 28, 255], width: 12, label: '11+ passages' }
+            ];
+        }
+
+        const counts = segments.map(s => s.count).sort((a, b) => a - b);
+        const N = counts.length;
+
+        // Get raw percentile values at 20%, 40%, 60%, 80%
+        const q20 = counts[Math.floor(N * 0.20)] || 1;
+        const q40 = counts[Math.floor(N * 0.40)] || 2;
+        const q60 = counts[Math.floor(N * 0.60)] || 4;
+        const q80 = counts[Math.floor(N * 0.80)] || 8;
+        const maxVal = counts[N - 1] || 10;
+
+        const palette = [
+            { color: [56, 189, 248, 190], width: 3 },   // Sky Blue (20%)
+            { color: [45, 212, 191, 210], width: 5 },   // Teal (40%)
+            { color: [250, 204, 21, 230], width: 7 },   // Yellow (60%)
+            { color: [249, 115, 22, 245], width: 9 },   // Orange (80%)
+            { color: [185, 28, 28, 255], width: 12 }    // Dark Red (100%)
+        ];
+
+        // Create discrete non-overlapping integer bounds
+        const rawBreaks = [1, q20, q40, q60, q80, maxVal];
+        const ranges = [];
+        let currMin = 1;
+
+        for (let i = 0; i < 5; i++) {
+            let bMax = rawBreaks[i + 1];
+            if (bMax < currMin) bMax = currMin;
+
+            // Ensure distinct boundary for next bucket if not at the top
+            if (i < 4 && bMax >= rawBreaks[i + 2]) {
+                // Keep bucket concise if duplicates occur
+                bMax = currMin;
+            }
+
+            const isLast = (i === 4) || (bMax >= maxVal);
+            const rangeMax = isLast ? Infinity : bMax;
+            
+            let label = "";
+            if (currMin === rangeMax || rangeMax === Infinity && currMin === maxVal) {
+                label = `${currMin} passage${currMin > 1 ? 's' : ''}`;
+            } else if (rangeMax === Infinity) {
+                label = `${currMin}+ passages`;
+            } else {
+                label = `${currMin} - ${rangeMax} passages`;
+            }
+
+            ranges.push({
+                min: currMin,
+                max: rangeMax,
+                color: palette[i].color,
+                width: palette[i].width,
+                label
+            });
+
+            if (rangeMax === Infinity) break;
+            currMin = rangeMax + 1;
+            if (currMin > maxVal) break;
+        }
+
+        return ranges;
+    },
+
     getSegmentColor(count) {
-        if (count === 1) return [56, 189, 248, 190];     // Sky Blue (1 passage)
-        if (count <= 3) return [45, 212, 191, 210];    // Teal (2-3 passages)
-        if (count <= 6) return [250, 204, 21, 230];    // Bright Yellow (4-6 passages)
-        if (count <= 10) return [249, 115, 22, 245];   // Orange (7-10 passages)
-        return [185, 28, 28, 255];                     // Deep Dark Red (10+ passages)
+        if (!this.flowThresholds || this.flowThresholds.length === 0) return [56, 189, 248, 190];
+        const matched = this.flowThresholds.find(t => count >= t.min && count <= t.max);
+        return matched ? matched.color : this.flowThresholds[this.flowThresholds.length - 1].color;
     },
 
     getSegmentWidth(count) {
-        if (count === 1) return 3;
-        if (count <= 3) return 5;
-        if (count <= 6) return 7;
-        if (count <= 10) return 9;
-        return 12;
+        if (!this.flowThresholds || this.flowThresholds.length === 0) return 3;
+        const matched = this.flowThresholds.find(t => count >= t.min && count <= t.max);
+        return matched ? matched.width : this.flowThresholds[this.flowThresholds.length - 1].width;
     },
 
     initMapControls() {
@@ -231,9 +345,9 @@ export const MapDisplay = {
 
         const controls = document.createElement('div');
         controls.id = 'map-controls-panel';
-        controls.className = 'absolute top-4 right-4 bg-white/95 backdrop-blur p-4 rounded-2xl shadow-xl z-[50] border border-slate-200 w-64 space-y-3';
+        controls.className = 'absolute top-4 right-4 bg-white/95 backdrop-blur p-4 rounded-2xl shadow-xl z-[50] border border-slate-200 w-72 space-y-3 text-xs';
         controls.innerHTML = `
-            <h4 class="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Visualisation & Style</h4>
+            <h4 class="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Visualisation & Filtres</h4>
             
             <!-- Mode Toggle -->
             <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
@@ -248,25 +362,46 @@ export const MapDisplay = {
                 </button>
             </div>
 
+            <!-- Distance Exclusion Slider -->
+            <div class="pt-2 border-t border-slate-100 space-y-1">
+                <div class="flex justify-between items-center text-[9px] font-bold text-slate-600">
+                    <span>Distance max salarié</span>
+                    <span id="val-max-distance" class="text-indigo-600 font-mono">${this.maxDistanceFilter} km</span>
+                </div>
+                <input type="range" id="input-max-distance" min="1" max="${this.maxDistanceLimit}" value="${this.maxDistanceFilter}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+            </div>
+
+            <!-- Minimum Flow Threshold Filter -->
+            <div id="flow-filter-box" class="pt-2 border-t border-slate-100 space-y-1 ${this.displayMode === 'heatmap' ? 'hidden' : ''}">
+                <div class="flex justify-between items-center text-[9px] font-bold text-slate-600">
+                    <span>Seuil min passages</span>
+                    <span id="val-min-flow" class="text-indigo-600 font-mono">${this.minFlowFilter} passage(s)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="range" id="input-min-flow" min="1" max="15" value="${this.minFlowFilter}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                    <button id="btn-reset-flow-filter" class="text-[8px] bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold px-1.5 py-0.5 rounded border border-slate-200 shrink-0">Reset</button>
+                </div>
+            </div>
+
             <!-- Heatmap Controls -->
             <div id="heatmap-sliders-box" class="pt-2 border-t border-slate-100 space-y-2 ${this.displayMode === 'flow' ? 'hidden' : ''}">
                 <div>
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
                         <span>Diffusion Heatmap</span>
-                        <span id="val-radius" class="text-indigo-600">${this.heatmapSettings.radius}px</span>
+                        <span id="val-radius" class="text-indigo-600 font-mono">${this.heatmapSettings.radius}px</span>
                     </div>
                     <input type="range" id="input-radius" min="10" max="70" value="${this.heatmapSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 </div>
                 <div>
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
                         <span>Seuil d'intensité</span>
-                        <span id="val-threshold" class="text-indigo-600">${this.heatmapSettings.threshold}</span>
+                        <span id="val-threshold" class="text-indigo-600 font-mono">${this.heatmapSettings.threshold}</span>
                     </div>
                     <input type="range" id="input-threshold" min="0.01" max="0.2" step="0.01" value="${this.heatmapSettings.threshold}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 </div>
             </div>
 
-            <!-- Points Controls (Size & Toggle) -->
+            <!-- Points Controls -->
             <div class="pt-2 border-t border-slate-100 space-y-2">
                 <div class="flex justify-between items-center">
                     <span class="text-[9px] font-extrabold uppercase text-slate-500">Points Salariés/Employeur</span>
@@ -278,7 +413,7 @@ export const MapDisplay = {
                 <div id="point-radius-box" class="${this.pointSettings.visible ? '' : 'hidden'}">
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
                         <span>Taille des marqueurs</span>
-                        <span id="val-point-radius" class="text-indigo-600">${this.pointSettings.radius}px</span>
+                        <span id="val-point-radius" class="text-indigo-600 font-mono">${this.pointSettings.radius}px</span>
                     </div>
                     <input type="range" id="input-point-radius" min="5" max="60" value="${this.pointSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 </div>
@@ -295,12 +430,36 @@ export const MapDisplay = {
             const slidersBox = document.getElementById('heatmap-sliders-box');
             if (slidersBox) slidersBox.classList.toggle('hidden', newMode === 'flow');
 
+            const flowBox = document.getElementById('flow-filter-box');
+            if (flowBox) flowBox.classList.toggle('hidden', newMode === 'heatmap');
+
             this.render(this.lastState);
         };
 
         document.getElementById('btn-mode-heatmap').onclick = () => updateModeUI('heatmap');
         document.getElementById('btn-mode-flow').onclick = () => updateModeUI('flow');
         document.getElementById('btn-mode-both').onclick = () => updateModeUI('both');
+
+        // Distance exclusion slider event
+        document.getElementById('input-max-distance').oninput = (e) => {
+            this.maxDistanceFilter = parseFloat(e.target.value);
+            document.getElementById('val-max-distance').innerText = `${this.maxDistanceFilter} km`;
+            this.render(this.lastState);
+        };
+
+        // Minimum passage filter event
+        document.getElementById('input-min-flow').oninput = (e) => {
+            this.minFlowFilter = parseInt(e.target.value);
+            document.getElementById('val-min-flow').innerText = `${this.minFlowFilter} passage(s)`;
+            this.render(this.lastState);
+        };
+
+        document.getElementById('btn-reset-flow-filter').onclick = () => {
+            this.minFlowFilter = 1;
+            document.getElementById('input-min-flow').value = 1;
+            document.getElementById('val-min-flow').innerText = `1 passage(s)`;
+            this.render(this.lastState);
+        };
 
         document.getElementById('input-radius').oninput = (e) => {
             this.heatmapSettings.radius = parseInt(e.target.value);
@@ -314,7 +473,6 @@ export const MapDisplay = {
             this.render(this.lastState);
         };
 
-        // Point toggle event handler
         document.getElementById('btn-toggle-points').onclick = () => {
             this.pointSettings.visible = !this.pointSettings.visible;
             const btn = document.getElementById('btn-toggle-points');
@@ -327,7 +485,6 @@ export const MapDisplay = {
             this.render(this.lastState);
         };
 
-        // Point size slider event handler
         document.getElementById('input-point-radius').oninput = (e) => {
             this.pointSettings.radius = parseInt(e.target.value);
             document.getElementById('val-point-radius').innerText = `${this.pointSettings.radius}px`;
@@ -349,36 +506,45 @@ export const MapDisplay = {
         if (!legend) {
             legend = document.createElement('div');
             legend.id = 'flow-legend-widget';
-            legend.className = 'absolute bottom-6 right-4 bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl z-[40] border border-slate-200 text-xs w-48 space-y-1.5';
+            legend.className = 'absolute bottom-6 right-4 bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl z-[40] border border-slate-200 text-xs w-52 space-y-1.5';
             container.appendChild(legend);
         }
 
-        legend.innerHTML = `
+        let legendHtml = `
             <div class="text-[9px] font-black uppercase text-slate-500 tracking-wider mb-2 flex items-center justify-between">
-                <span>Légende des Flux</span>
+                <span>Légende (Tranches 20%)</span>
                 <span class="text-indigo-600">Passages</span>
             </div>
-            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
-                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(56, 189, 248)"></span>
-                <span>1 passage</span>
-            </div>
-            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
-                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(45, 212, 191)"></span>
-                <span>2 - 3 passages</span>
-            </div>
-            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
-                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(250, 204, 21)"></span>
-                <span>4 - 6 passages</span>
-            </div>
-            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
-                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(249, 115, 22)"></span>
-                <span>7 - 10 passages</span>
-            </div>
-            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700 font-bold">
-                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(185, 28, 28)"></span>
-                <span>10+ passages</span>
-            </div>
         `;
+
+        if (this.flowThresholds && this.flowThresholds.length > 0) {
+            this.flowThresholds.forEach(t => {
+                const rgb = `rgb(${t.color[0]}, ${t.color[1]}, ${t.color[2]})`;
+                const isFiltered = t.max < this.minFlowFilter;
+                legendHtml += `
+                    <div class="flex items-center space-x-2 text-[10px] font-semibold ${isFiltered ? 'line-through opacity-40' : 'text-slate-700'} cursor-pointer hover:text-indigo-600"
+                         onclick="window.MapDisplay.toggleLegendFilter(${t.min})">
+                        <span class="w-3 h-3 rounded-full inline-block shrink-0 shadow-sm" style="background-color: ${rgb}"></span>
+                        <span>${t.label}</span>
+                    </div>
+                `;
+            });
+        }
+
+        legend.innerHTML = legendHtml;
+    },
+
+    toggleLegendFilter(minVal) {
+        if (this.minFlowFilter === minVal) {
+            this.minFlowFilter = 1;
+        } else {
+            this.minFlowFilter = minVal;
+        }
+        const inputMinFlow = document.getElementById('input-min-flow');
+        if (inputMinFlow) inputMinFlow.value = this.minFlowFilter;
+        const valMinFlow = document.getElementById('val-min-flow');
+        if (valMinFlow) valMinFlow.innerText = `${this.minFlowFilter} passage(s)`;
+        this.render(this.lastState);
     },
 
     getMapImage() {
@@ -547,8 +713,10 @@ export const MapDisplay = {
         return R * 2 * Math.atan2(Math.sqrt(clampedA), Math.sqrt(1 - clampedA));
     },
 
-    // Sample route geometry into discrete spatial points, excluding the company terminal stack to allow heat dispersion along roads
-    samplePolylinePoints(coords, stepKm = 0.03, companyCoords = null) {
+    /**
+     * Logarithmic polyline point sampling to preserve corridor contrast without destination saturation
+     */
+    samplePolylinePointsLog(coords, stepKm = 0.04, companyCoords = null) {
         const points = [];
         if (!coords || coords.length === 0) return points;
 
@@ -556,12 +724,13 @@ export const MapDisplay = {
             const p1 = coords[i];
             const p2 = coords[i + 1];
 
-            // If point is within 80m of the employer destination, omit/downweight to avoid hotspot spike
-            let weight = 1;
+            // Apply logarithmic attenuation near employer node to maintain broad contrast
+            let weight = 1.0;
             if (companyCoords) {
                 const distToCompany = this.haversineDistance(p1[1], p1[0], companyCoords[1], companyCoords[0]);
-                if (distToCompany < 0.08) {
-                    weight = 0.1; // Greatly reduce destination node weight
+                if (distToCompany < 0.1) {
+                    weight = Math.log1p(distToCompany * 10) / Math.log1p(10); // Log compression
+                    weight = Math.max(0.15, weight);
                 }
             }
 
@@ -576,10 +745,13 @@ export const MapDisplay = {
                     const interpLon = p1[0] + (p2[0] - p1[0]) * ratio;
                     const interpLat = p1[1] + (p2[1] - p1[1]) * ratio;
 
-                    let interpWeight = 1;
+                    let interpWeight = 1.0;
                     if (companyCoords) {
                         const distToComp = this.haversineDistance(interpLat, interpLon, companyCoords[1], companyCoords[0]);
-                        if (distToComp < 0.08) interpWeight = 0.1;
+                        if (distToComp < 0.1) {
+                            interpWeight = Math.log1p(distToComp * 10) / Math.log1p(10);
+                            interpWeight = Math.max(0.15, interpWeight);
+                        }
                     }
 
                     points.push({ coords: [interpLon, interpLat], weight: interpWeight });
@@ -621,3 +793,5 @@ export const MapDisplay = {
         return { longitude: 2.3522, latitude: 48.8566, zoom: 11, pitch: 0, bearing: 0 };
     }
 };
+
+window.MapDisplay = MapDisplay;
