@@ -5,6 +5,7 @@ import { BboxOptimizer } from './modules/bbox_optimizer.js';
 import { RouterAPI } from './modules/router_api.js';
 import { MapDisplay } from './modules/map_display.js';
 import { Analytics } from './modules/analytics.js';
+import { CarpoolingPotential } from './modules/carpooling_potential.js';
 
 export const App = {
     appState: {
@@ -12,10 +13,11 @@ export const App = {
         isAuthenticated: false,
         userName: null,
         rawData: null,
-        coordinates: null,      // Géocodage réel BAN Batch
-        geocodeStats: null,     // Métriques d'adresses géocodées / non retrouvées
-        selectedBbox: null,     // Emprise BBOX optimisée
-        routes: null
+        coordinates: null,
+        geocodeStats: null,
+        selectedBbox: null,
+        routes: null,
+        carRoutes: null
     },
 
     stepsOrder: ['step-auth', 'step-csv', 'step-geo', 'step-bbox', 'step-route', 'step-map'],
@@ -93,7 +95,10 @@ export const App = {
                             setTimeout(() => {
                                 this.handleNavigation({
                                     detail: {
-                                        data: { routes: routesResult },
+                                        data: { 
+                                            routes: routesResult.bikeRoutes || routesResult,
+                                            carRoutes: routesResult.carRoutes
+                                        },
                                         next: 'step-map'
                                     }
                                 });
@@ -106,6 +111,8 @@ export const App = {
                 if (this.appState.routes) {
                     MapDisplay.render(this.appState);
                     Analytics.init(this.appState);
+                    CarpoolingPotential.init(this.appState);
+                    
                     const sess = document.getElementById('session-info');
                     if (sess) sess.innerText = this.appState.userName || "Marius Admin";
                 }
