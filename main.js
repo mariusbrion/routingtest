@@ -111,6 +111,7 @@ export const App = {
                 if (this.appState.routes) {
                     MapDisplay.render(this.appState);
                     Analytics.init(this.appState);
+                    
                     CarpoolingPotential.init(this.appState);
                     
                     const sess = document.getElementById('session-info');
