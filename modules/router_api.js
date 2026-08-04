@@ -10,6 +10,34 @@ export const RouterAPI = {
         console.log("[RouterAPI] Initialisation du moteur de routage WFS streaming BD TOPO...");
     },
 
+    encodePolyline(coords) {
+        if (!coords || !coords.length) return null;
+        let str = "";
+        let prevLat = 0;
+        let prevLng = 0;
+
+        for (let i = 0; i < coords.length; i++) {
+            let lat = Math.round(coords[i][1] * 1e5);
+            let lng = Math.round(coords[i][0] * 1e5);
+
+            let dLat = lat - prevLat;
+            let dLng = lng - prevLng;
+
+            prevLat = lat;
+            prevLng = lng;
+
+            for (let val of [dLat, dLng]) {
+                let num = val < 0 ? ~(val << 1) : (val << 1);
+                while (num >= 0x20) {
+                    str += String.fromCharCode((0x20 | (num & 0x1f)) + 63);
+                    num >>= 5;
+                }
+                str += String.fromCharCode(num + 63);
+            }
+        }
+        return str;
+    },
+
     async logSession(destAddress, coords) {
         try {
             let finalName = this.currentUserName || "Anonyme";
