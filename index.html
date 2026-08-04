@@ -335,27 +335,68 @@
                 </div>
 
                 <div id="analytics-dashboard" class="hidden bg-white p-8 border-b border-slate-200">
-                    <div class="max-w-4xl mx-auto">
-                        <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
-                            <div class="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
-                                <button id="toggle-dist" class="btn-toggle active px-6 py-2.5 text-xs font-black rounded-xl uppercase tracking-wider">Distances</button>
-                                <button id="toggle-time" class="btn-toggle px-6 py-2.5 text-xs font-black rounded-xl uppercase tracking-wider">Temps</button>
-                            </div>
-                            <button id="bike-toggle" class="btn-toggle hidden px-5 py-2.5 bg-white border border-slate-200 text-xs font-black rounded-xl hover:bg-slate-50 uppercase tracking-wider">
-                                🚲 Vélo électrique (-25%)
+                    <div class="max-w-4xl mx-auto space-y-6">
+                        
+                        <!-- TAB SELECTOR : VÉLO vs COVOITURAGE -->
+                        <div class="flex items-center justify-center gap-3 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 max-w-sm mx-auto">
+                            <button id="tab-btn-bike" onclick="window.switchDashboardTab('bike')" class="flex-1 py-2 text-xs font-black rounded-xl bg-indigo-600 text-white shadow transition-all">
+                                🚲 Diagnostic Vélo
+                            </button>
+                            <button id="tab-btn-carpool" onclick="window.switchDashboardTab('carpool')" class="flex-1 py-2 text-xs font-black rounded-xl text-slate-600 hover:text-slate-900 transition-all">
+                                🚗 Potentiel Covoiturage
                             </button>
                         </div>
 
-                        <div class="mb-8">
-                            <h3 id="chart-title" class="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Distribution par Distance</h3>
-                            <div class="h-72 w-full relative">
-                                <canvas id="interactiveChart"></canvas>
+                        <!-- SECTION VÉLO -->
+                        <div id="tab-content-bike">
+                            <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
+                                <div class="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                                    <button id="toggle-dist" class="btn-toggle active px-6 py-2.5 text-xs font-black rounded-xl uppercase tracking-wider">Distances</button>
+                                    <button id="toggle-time" class="btn-toggle px-6 py-2.5 text-xs font-black rounded-xl uppercase tracking-wider">Temps</button>
+                                </div>
+                                <button id="bike-toggle" class="btn-toggle hidden px-5 py-2.5 bg-white border border-slate-200 text-xs font-black rounded-xl hover:bg-slate-50 uppercase tracking-wider">
+                                    🚲 Vélo électrique (-25%)
+                                </button>
                             </div>
+
+                            <div class="mb-8">
+                                <h3 id="chart-title" class="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Distribution par Distance</h3>
+                                <div class="h-72 w-full relative">
+                                    <canvas id="interactiveChart"></canvas>
+                                </div>
+                            </div>
+
+                            <div id="statsGrid" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
                         </div>
 
-                        <div id="statsGrid" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+                        <!-- SECTION COVOITURAGE -->
+                        <div id="tab-content-carpool" class="hidden">
+                            <div id="carpooling-dashboard"></div>
+                        </div>
+
                     </div>
                 </div>
+
+                <script>
+                    window.switchDashboardTab = function(tab) {
+                        const bikeTab = document.getElementById('tab-content-bike');
+                        const carpoolTab = document.getElementById('tab-content-carpool');
+                        const btnBike = document.getElementById('tab-btn-bike');
+                        const btnCarpool = document.getElementById('tab-btn-carpool');
+
+                        if (tab === 'bike') {
+                            bikeTab?.classList.remove('hidden');
+                            carpoolTab?.classList.add('hidden');
+                            btnBike.className = 'flex-1 py-2 text-xs font-black rounded-xl bg-indigo-600 text-white shadow transition-all';
+                            btnCarpool.className = 'flex-1 py-2 text-xs font-black rounded-xl text-slate-600 hover:text-slate-900 transition-all';
+                        } else {
+                            bikeTab?.classList.add('hidden');
+                            carpoolTab?.classList.remove('hidden');
+                            btnBike.className = 'flex-1 py-2 text-xs font-black rounded-xl text-slate-600 hover:text-slate-900 transition-all';
+                            btnCarpool.className = 'flex-1 py-2 text-xs font-black rounded-xl bg-indigo-600 text-white shadow transition-all';
+                        }
+                    };
+                </script>
 
                 <div class="relative">
                     <div id="map-container"></div>
