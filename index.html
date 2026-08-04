@@ -106,7 +106,6 @@
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
 
-    <!-- BARRE DE NAVIGATION CLAIRE -->
     <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
         <div class="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
             <div class="flex items-center space-x-3">
@@ -132,7 +131,6 @@
 
     <main class="flex-grow max-w-7xl mx-auto w-full p-4 md:p-8">
 
-        <!-- STEP 0: AUTHENTIFICATION -->
         <section id="step-auth" class="step-view active">
             <div class="max-w-md mx-auto bg-white rounded-3xl shadow-xl border border-slate-200 p-10 mt-12 text-center">
                 <div class="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner">
@@ -151,7 +149,6 @@
             </div>
         </section>
 
-        <!-- STEP 1: CSV PARSER AVEC PRÉVISUALISEUR & FUSION DE COLONNES -->
         <section id="step-csv" class="step-view">
             <div id="session-banner" class="bg-emerald-50 text-emerald-800 px-5 py-3 rounded-2xl border border-emerald-200 mb-8 flex items-center justify-between shadow-sm">
                 <div class="flex items-center space-x-3">
@@ -176,17 +173,14 @@
                     </label>
                 </div>
 
-                <!-- Zone de prévisualisation et mapping -->
                 <div id="csv-preview-container" class="hidden space-y-6 border-t border-slate-200 pt-6">
                     
-                    <!-- 1. Sélecteur de colonnes à fusionner -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 p-5 rounded-2xl border border-slate-200">
                         <div>
                             <label class="block text-xs font-extrabold uppercase tracking-wider text-indigo-900 mb-2">
                                 🏠 Adresse Employé (Colonnes à fusionner)
                             </label>
                             <div id="emp-cols-container" class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
-                                <!-- Checkboxes colonnes employé -->
                             </div>
                         </div>
 
@@ -195,12 +189,10 @@
                                 🏢 Adresse Employeur (Colonnes à fusionner)
                             </label>
                             <div id="site-cols-container" class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar p-2 bg-white rounded-xl border border-slate-200">
-                                <!-- Checkboxes colonnes employeur -->
                             </div>
                         </div>
                     </div>
 
-                    <!-- 2. APERÇU DES ADRESSES COMPOSÉES EN TEMPS RÉEL -->
                     <div class="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 space-y-2 text-xs">
                         <div class="font-extrabold text-indigo-900 uppercase tracking-wide text-[10px]">✨ Aperçu dynamique des adresses assemblées :</div>
                         <div class="flex items-center gap-2 text-slate-700 font-mono">
@@ -213,7 +205,6 @@
                         </div>
                     </div>
 
-                    <!-- 3. Tableau d'aperçu des 5 premières lignes -->
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
                             <h3 class="text-xs font-bold text-slate-700 flex items-center gap-2">
@@ -223,25 +214,23 @@
                         </div>
                         <div class="overflow-x-auto border border-slate-200 rounded-xl max-h-40 custom-scrollbar">
                             <table id="csv-preview-table" class="w-full text-xs text-left text-slate-600">
-                                <!-- Injecté par CSVParser -->
                             </table>
                         </div>
                     </div>
 
                     <button id="btn-confirm-columns" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 rounded-2xl transition-all shadow-xl shadow-indigo-200 active:scale-[0.98] flex items-center justify-center gap-2">
-                        <span>Valider la sélection & lancer le géocodage BAN Batch</span>
+                        <span>Valider la sélection &amp; lancer le géocodage BAN Batch</span>
                         <span>→</span>
                     </button>
                 </div>
             </div>
         </section>
 
-        <!-- STEP 2: GEOCODER BAN BATCH -->
         <section id="step-geo" class="step-view">
             <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-12 max-w-lg mx-auto text-center">
                 <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 animate-pulse">⚡</div>
                 <h3 class="text-xl font-extrabold text-slate-800 mb-2">Géocodage BAN Batch en cours...</h3>
-                <p class="text-slate-500 text-xs mb-6">Traitement haute vitesse par lots via l'API officielle Base Adresse Nationale (Gouvernement).</p>
+                <p class="text-slate-500 text-xs mb-6">Traitement haute vitesse par lots via l'API officielle Base Adresse Nationale.</p>
                 
                 <div class="w-full bg-slate-100 rounded-full h-3 overflow-hidden mb-3 border border-slate-200">
                     <div id="geo-progress-bar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
@@ -250,7 +239,6 @@
             </div>
         </section>
 
-        <!-- STEP BBOX: OPTIMISATION D'EMPRISE IGN -->
         <section id="step-bbox" class="step-view">
             <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 flex flex-col gap-4">
                 
@@ -273,19 +261,15 @@
                     </div>
                 </div>
 
-                <!-- CARTE LEAFLET + VOLET DROIT SANS ROGNAGE -->
                 <div class="relative w-full h-[620px] rounded-2xl overflow-hidden border border-slate-200">
                     <div id="bboxMap" class="w-full h-full z-0"></div>
 
-                    <!-- VOLET DROIT DES SCÉNARIOS -->
                     <div id="bbox-popups-container" class="absolute top-4 right-4 z-[1000] w-80 max-w-[calc(100%-2rem)] max-h-[580px] overflow-y-auto custom-scrollbar space-y-3 pointer-events-auto pr-1">
-                        <!-- Pop-ups injectées par BboxOptimizer -->
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- STEP 3: ROUTE API -->
         <section id="step-route" class="step-view">
             <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-w-5xl mx-auto">
                 <div class="p-6 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
@@ -299,20 +283,19 @@
                     </div>
                 </div>
 
-                <!-- CARTE DECK.GL INTERACTIVE EN TEMPS RÉEL -->
                 <div class="relative w-full h-[450px] bg-slate-900">
                     <div id="route-deck-container" class="w-full h-full"></div>
                 </div>
 
                 <div id="route-logs" class="bg-slate-900 text-teal-400 p-4 font-mono text-xs h-32 overflow-y-auto text-left leading-relaxed shadow-inner border-t border-slate-800">
-                    > Transmetteur BBOX initialisé...
+                    &gt; Transmetteur BBOX initialisé...
                 </div>
             </div>
         </section>
 
-        <!-- STEP 4: DASHBOARD & MAP -->
         <section id="step-map" class="step-view">
-            <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div class="bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col space-y-8">
+                
                 <div class="p-8 bg-slate-50 border-b border-slate-200 flex flex-wrap gap-6 items-center justify-between">
                     <div class="flex gap-4 flex-grow max-w-2xl">
                         <div class="flex-grow">
@@ -334,20 +317,10 @@
                     </div>
                 </div>
 
-                <div id="analytics-dashboard" class="hidden bg-white p-8 border-b border-slate-200">
+                <!-- DASHBOARD VÉLO -->
+                <div id="analytics-dashboard" class="hidden bg-white p-8">
                     <div class="max-w-4xl mx-auto space-y-6">
                         
-                        <!-- TAB SELECTOR : VÉLO vs COVOITURAGE -->
-                        <div class="flex items-center justify-center gap-3 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 max-w-sm mx-auto">
-                            <button id="tab-btn-bike" onclick="window.switchDashboardTab('bike')" class="flex-1 py-2 text-xs font-black rounded-xl bg-indigo-600 text-white shadow transition-all">
-                                🚲 Diagnostic Vélo
-                            </button>
-                            <button id="tab-btn-carpool" onclick="window.switchDashboardTab('carpool')" class="flex-1 py-2 text-xs font-black rounded-xl text-slate-600 hover:text-slate-900 transition-all">
-                                🚗 Potentiel Covoiturage
-                            </button>
-                        </div>
-
-                        <!-- SECTION VÉLO -->
                         <div id="tab-content-bike">
                             <div class="flex flex-wrap items-center justify-between gap-4 mb-8">
                                 <div class="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
@@ -369,44 +342,23 @@
                             <div id="statsGrid" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
                         </div>
 
-                        <!-- SECTION COVOITURAGE -->
-                        <div id="tab-content-carpool" class="hidden">
-                            <div id="carpooling-dashboard"></div>
-                        </div>
-
                     </div>
                 </div>
 
-                <script>
-                    window.switchDashboardTab = function(tab) {
-                        const bikeTab = document.getElementById('tab-content-bike');
-                        const carpoolTab = document.getElementById('tab-content-carpool');
-                        const btnBike = document.getElementById('tab-btn-bike');
-                        const btnCarpool = document.getElementById('tab-btn-carpool');
-
-                        if (tab === 'bike') {
-                            bikeTab?.classList.remove('hidden');
-                            carpoolTab?.classList.add('hidden');
-                            btnBike.className = 'flex-1 py-2 text-xs font-black rounded-xl bg-indigo-600 text-white shadow transition-all';
-                            btnCarpool.className = 'flex-1 py-2 text-xs font-black rounded-xl text-slate-600 hover:text-slate-900 transition-all';
-                        } else {
-                            bikeTab?.classList.add('hidden');
-                            carpoolTab?.classList.remove('hidden');
-                            btnBike.className = 'flex-1 py-2 text-xs font-black rounded-xl text-slate-600 hover:text-slate-900 transition-all';
-                            btnCarpool.className = 'flex-1 py-2 text-xs font-black rounded-xl bg-indigo-600 text-white shadow transition-all';
-                        }
-                    };
-                </script>
-
-                <div class="relative">
+                <!-- CARTE DECK.GL INTERACTIVE -->
+                <div class="relative px-8">
                     <div id="map-container"></div>
                 </div>
 
                 <div id="cloud-logs" class="log-terminal border-t border-slate-800">
-                    > Marius prêt.
+                    &gt; Marius prêt.
+                </div>
+
+                <div id="carpooling-section-container" class="p-8 border-t border-slate-200 bg-slate-50/50">
+                    <div id="carpooling-dashboard"></div>
                 </div>
                 
-                <div class="p-4 bg-white flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <div class="p-4 bg-white flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400 border-t border-slate-100">
                     <span id="session-info">Moteur d'analyse actif</span>
                     <button onclick="location.reload()" class="text-indigo-600 hover:underline">Réinitialiser Session</button>
                 </div>
@@ -415,7 +367,7 @@
 
         <div class="signature">
             <a href="https://mariusbrion.github.io/portfolio/" target="_blank">
-                <span style="font-weight:500">Conçu & développé par</span> 
+                <span style="font-weight:500">Conçu &amp; développé par</span> 
                 <span style="font-weight:800;color:#4f46e5;margin-left:4px">Marius Brion</span>
             </a>
         </div>
