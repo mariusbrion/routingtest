@@ -3,11 +3,11 @@ export const CarpoolingPotential = {
     chartInstance: null,
     mapInstance: null,
     corridorLayers: [],
-    colorPalette: ['#4f46e5', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6'],
+    colorPalette: ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6'],
 
     init(state) {
         this.appState = state;
-        console.log("[CarpoolingPotential] Initialisation de l'Analyse Cartographique des Corridors...");
+        console.log("[CarpoolingPotential] Initialisation du Diagnostic de Covoiturage Ciblé...");
 
         const container = document.getElementById('carpooling-dashboard');
         if (!container) return;
@@ -56,10 +56,9 @@ export const CarpoolingPotential = {
         const employerLat = route.end_lat;
         const employerLon = route.end_lon;
 
-        // Exclure les points situés à moins de 500m de l'entreprise
-        const nonEmployerCoords = rawCoords.filter(p => this.haversineDistance(p[1], p[0], employerLat, employerLon) > 0.5);
+        // Strict: Exclure les 800m avant le site employeur pour éliminer le biais de convergence finale
+        const nonEmployerCoords = rawCoords.filter(p => this.haversineDistance(p[1], p[0], employerLat, employerLon) > 0.8);
 
-        // Sous-échantillonnage dynamique (~300m d'écartement)
         const filteredCoords = [];
         let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
         let prevPoint = null;
@@ -72,7 +71,7 @@ export const CarpoolingPotential = {
             if (lon < minLon) minLon = lon;
             if (lon > maxLon) maxLon = lon;
 
-            if (!prevPoint || this.haversineDistance(prevPoint[1], prevPoint[0], lat, lon) >= 0.3) {
+            if (!prevPoint || this.haversineDistance(prevPoint[1], prevPoint[0], lat, lon) >= 0.35) {
                 filteredCoords.push(p);
                 prevPoint = p;
             }
@@ -93,16 +92,15 @@ export const CarpoolingPotential = {
             return { sharedKm: 0, overlapRatioPct: 0 };
         }
 
-        // Pré-filtrage rapide Bounding Box (tolérance 1km)
         if (pA.bbox && pB.bbox) {
-            if (pA.bbox.maxLat + 0.01 < pB.bbox.minLat || pA.bbox.minLat - 0.01 > pB.bbox.maxLat ||
-                pA.bbox.maxLon + 0.01 < pB.bbox.minLon || pA.bbox.minLon - 0.01 > pB.bbox.maxLon) {
+            if (pA.bbox.maxLat + 0.015 < pB.bbox.minLat || pA.bbox.minLat - 0.015 > pB.bbox.maxLat ||
+                pA.bbox.maxLon + 0.015 < pB.bbox.minLon || pA.bbox.minLon - 0.015 > pB.bbox.maxLon) {
                 return { sharedKm: 0, overlapRatioPct: 0 };
             }
         }
 
         let sharedPointsCount = 0;
-        const thresholdKm = 0.35; // Rayon 350m
+        const thresholdKm = 0.4; // 400m tolerance
 
         coordsA.forEach(ptA => {
             const isNear = coordsB.some(ptB => this.haversineDistance(ptA[1], ptA[0], ptB[1], ptB[0]) <= thresholdKm);
@@ -120,28 +118,20 @@ export const CarpoolingPotential = {
         return { sharedKm, overlapRatioPct };
     },
 
-    computeRouteOverlap(routeA, routeB) {
-        const pA = this.preprocessRoute(routeA);
-        const pB = this.preprocessRoute(routeB);
-        return this.computeRouteOverlapPreprocessed(pA, pB);
-    },
-
     analyzeCarpoolingData() {
         const carRoutes = this.appState.carRoutes || this.appState.routes || [];
         const totalEmployees = carRoutes.length;
 
         if (totalEmployees === 0) return null;
 
-        const longDistanceRoutes = carRoutes.filter(r => (parseFloat(r.distance_km) || 0) > 15);
+        // Priorité absolue aux longs trajets (> 15km)
+        const longDistanceRoutes = carRoutes.filter(r => (parseFloat(r.distance_km) || 0) >= 15);
 
-        // Pré-traitement unique des itinéraires
+        // Preprocessing des itinéraires
         const processed = carRoutes.map(r => this.preprocessRoute(r));
         const N = processed.length;
 
-        // Matrice d'overlap pré-calculée
         const overlapMatrix = Array.from({ length: N }, () => new Array(N));
-
-        const matchScores = [];
         const scoreDistribution = { high: 0, good: 0, moderate: 0, low: 0 };
 
         for (let i = 0; i < N; i++) {
@@ -149,91 +139,107 @@ export const CarpoolingPotential = {
                 const rA = carRoutes[i];
                 const rB = carRoutes[j];
 
+                const distA = parseFloat(rA.distance_km || 0);
+                const distB = parseFloat(rB.distance_km || 0);
+                const minDistance = Math.min(distA, distB);
+
                 const domicileDist = this.haversineDistance(rA.start_lat, rA.start_lon, rB.start_lat, rB.start_lon);
                 const { sharedKm, overlapRatioPct } = this.computeRouteOverlapPreprocessed(processed[i], processed[j]);
 
                 overlapMatrix[i][j] = overlapRatioPct;
                 overlapMatrix[j][i] = overlapRatioPct;
 
-                // Classement pour histogramme
+                // Restrindre les trajets ultra-courts (< 5km) sauf si match exceptionnel (>= 80%)
+                if (minDistance < 5.0 && overlapRatioPct < 80) {
+                    continue;
+                }
+
                 if (overlapRatioPct >= 80) scoreDistribution.high++;
                 else if (overlapRatioPct >= 60) scoreDistribution.good++;
                 else if (overlapRatioPct >= 40) scoreDistribution.moderate++;
                 else scoreDistribution.low++;
-
-                if (overlapRatioPct >= 40 || domicileDist <= 5.0) {
-                    matchScores.push({
-                        empA: rA,
-                        empB: rB,
-                        domicileDist,
-                        sharedKm,
-                        overlapRatioPct
-                    });
-                }
             }
         }
 
-        // 2. Regroupement par Bassins/Corridors de Mobilité (Macro-Zones)
         const visited = new Set();
-        const macroCorridors = [];
+        const affinityPools = [];
 
-        for (let i = 0; i < N; i++) {
+        // Trier les employés candidats du plus éloigné au plus proche pour privilégier les trajets structurants
+        const sortedIndices = Array.from({ length: N }, (_, idx) => idx)
+            .sort((a, b) => (parseFloat(carRoutes[b].distance_km) || 0) - (parseFloat(carRoutes[a].distance_km) || 0));
+
+        for (const i of sortedIndices) {
             const rootEmp = carRoutes[i];
-            if (visited.has(rootEmp.id)) continue;
+            const rootDist = parseFloat(rootEmp.distance_km || 0);
 
-            const corridorMembers = [rootEmp];
-            visited.add(rootEmp.id);
+            // Ne pas créer de pool pour des employés habitant à moins de 4km du lieu de travail
+            if (rootDist < 4.0 || visited.has(rootEmp.id)) continue;
 
-            for (let j = i + 1; j < N; j++) {
+            const poolMembers = [rootEmp];
+
+            for (const j of sortedIndices) {
+                if (i === j) continue;
                 const candidate = carRoutes[j];
                 if (visited.has(candidate.id)) continue;
+
+                const candDist = parseFloat(candidate.distance_km || 0);
+                if (candDist < 4.0) continue;
 
                 const domDist = this.haversineDistance(rootEmp.start_lat, rootEmp.start_lon, candidate.start_lat, candidate.start_lon);
                 const overlapRatioPct = overlapMatrix[i][j] || 0;
 
-                if (domDist <= 7.0 || overlapRatioPct >= 40) {
-                    corridorMembers.push(candidate);
-                    visited.add(candidate.id);
+                // Condition de regroupement en Bassin d'Affinité (Domicile < 6km OU overlap > 50%)
+                if ((domDist <= 6.0 && overlapRatioPct >= 35) || overlapRatioPct >= 55) {
+                    poolMembers.push(candidate);
                 }
             }
 
-            if (corridorMembers.length >= 2) {
-                // Découpage du Macro-Corridor en équipages optimaux de 2 à 4 personnes
+            if (poolMembers.length >= 2) {
+                poolMembers.forEach(m => visited.add(m.id));
+
+                const avgDist = parseFloat((poolMembers.reduce((sum, m) => sum + parseFloat(m.distance_km || 0), 0) / poolMembers.length).toFixed(1));
+
+                // Calcul du score d'impact stratégique : Distance moyenne * Taille du gisement
+                const strategicScore = avgDist * poolMembers.length;
+
+                // Découpage interne en voitures de 2 à 4 personnes (Sub-crews)
                 const subCrews = [];
-                const membersToProcess = [...corridorMembers];
+                const membersToProcess = [...poolMembers];
 
                 while (membersToProcess.length >= 2) {
                     const crewSize = Math.min(4, membersToProcess.length);
                     const currentCrew = membersToProcess.splice(0, crewSize);
 
-                    const avgDist = parseFloat((currentCrew.reduce((sum, m) => sum + parseFloat(m.distance_km || 0), 0) / currentCrew.length).toFixed(1));
-                    const avgMatchPct = 65 + Math.round(Math.random() * 25);
+                    const crewAvgDist = parseFloat((currentCrew.reduce((sum, m) => sum + parseFloat(m.distance_km || 0), 0) / currentCrew.length).toFixed(1));
 
                     subCrews.push({
                         members: currentCrew,
                         size: currentCrew.length,
-                        avgDist,
-                        avgMatchPct
+                        avgDist: crewAvgDist
                     });
                 }
 
-                const avgLat = corridorMembers.reduce((sum, m) => sum + m.start_lat, 0) / corridorMembers.length;
-                const avgLon = corridorMembers.reduce((sum, m) => sum + m.start_lon, 0) / corridorMembers.length;
+                const avgLat = poolMembers.reduce((sum, m) => sum + m.start_lat, 0) / poolMembers.length;
+                const avgLon = poolMembers.reduce((sum, m) => sum + m.start_lon, 0) / poolMembers.length;
 
-                macroCorridors.push({
-                    id: `corridor-${macroCorridors.length + 1}`,
-                    totalMembers: corridorMembers.length,
+                affinityPools.push({
+                    id: `pool-${affinityPools.length + 1}`,
+                    poolMembers,
+                    totalMembers: poolMembers.length,
                     subCrews,
                     centerLat: avgLat,
                     centerLon: avgLon,
-                    avgKmFromSite: parseFloat((corridorMembers.reduce((sum, m) => sum + parseFloat(m.distance_km || 0), 0) / corridorMembers.length).toFixed(1))
+                    avgKmFromSite: avgDist,
+                    strategicScore
                 });
             }
         }
 
-        // 3. Calculs d'impact globaux
-        const carpoolableEmployeesCount = macroCorridors.reduce((acc, c) => acc + c.totalMembers, 0);
-        const totalCrewsCount = macroCorridors.reduce((acc, c) => acc + c.subCrews.length, 0);
+        // Tri prioritaire des pools : Les trajets les plus longs avec le plus grand gisement en premier !
+        affinityPools.sort((a, b) => b.strategicScore - a.strategicScore);
+
+        const carpoolableEmployeesCount = affinityPools.reduce((acc, c) => acc + c.totalMembers, 0);
+        const totalCrewsCount = affinityPools.reduce((acc, c) => acc + c.subCrews.length, 0);
         const carsRemoved = Math.max(0, carpoolableEmployeesCount - totalCrewsCount);
 
         const avgKmGlobal = carRoutes.reduce((acc, r) => acc + (parseFloat(r.distance_km) || 0), 0) / (totalEmployees || 1);
@@ -250,7 +256,7 @@ export const CarpoolingPotential = {
             co2SavedTons,
             financialSavingsTotal,
             carpoolPct: parseFloat(((carpoolableEmployeesCount / totalEmployees) * 100).toFixed(1)),
-            macroCorridors,
+            affinityPools,
             scoreDistribution
         };
     },
@@ -270,25 +276,25 @@ export const CarpoolingPotential = {
                 <div class="bg-slate-900 text-white rounded-3xl p-8 shadow-xl border border-slate-800 flex flex-wrap justify-between items-center gap-6">
                     <div>
                         <span class="text-[10px] font-black uppercase tracking-widest text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
-                            🚗 Cartographie &amp; Corridors Covoiturage
+                            🚗 Gisements d'Affinité &amp; Corridors Strategiques
                         </span>
-                        <h3 class="text-2xl font-black mt-3">Analyse Spatiale des Équipages</h3>
+                        <h3 class="text-2xl font-black mt-3">Analyse Prioritaire des Longs Trajets</h3>
                         <p class="text-xs text-slate-400 mt-2 max-w-2xl leading-relaxed">
-                            Visualisation géographique des bassins d'origine et des routes partagées ($\ge 40\%$ de superposition). 
-                            Priorité aux <strong class="text-white">${stats.longDistanceCount} salariés</strong> résidant à plus de 15km.
+                            Priorité absolue aux <strong class="text-emerald-400">${stats.longDistanceCount} salariés</strong> résidant à plus de 15km. 
+                            Exclusion des trajets ultra-courts (< 5km) pour se concentrer sur le gisement à fort impact environnemental et financier.
                         </p>
                     </div>
                     <div class="bg-indigo-600/20 border border-indigo-500/30 p-5 rounded-2xl text-center shrink-0">
                         <span class="text-3xl font-black text-emerald-400 font-mono">${stats.carpoolPct}%</span>
-                        <span class="block text-[10px] uppercase font-bold text-slate-300 mt-1">Salariés Covoiturables</span>
+                        <span class="block text-[10px] uppercase font-bold text-slate-300 mt-1">Potentiel Réseau Mobilisable</span>
                     </div>
                 </div>
 
                 <!-- Grille de KPIs -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="stat-card bg-white p-5 rounded-2xl border border-slate-200 text-center shadow-sm">
-                        <div class="stat-value text-indigo-600 text-2xl font-black">${stats.totalCrewsCount}</div>
-                        <div class="stat-label text-slate-500 font-bold text-[10px] uppercase mt-1">Équipages (2 à 4 pers.)</div>
+                        <div class="stat-value text-indigo-600 text-2xl font-black">${stats.affinityPools.length}</div>
+                        <div class="stat-label text-slate-500 font-bold text-[10px] uppercase mt-1">Gisements d'Origine</div>
                     </div>
                     <div class="stat-card bg-white p-5 rounded-2xl border border-slate-200 text-center shadow-sm">
                         <div class="stat-value text-emerald-600 text-2xl font-black">-${stats.carsRemoved}</div>
@@ -304,14 +310,14 @@ export const CarpoolingPotential = {
                     </div>
                 </div>
 
-                <!-- Carte Interactive des Corridors & Équipages -->
+                <!-- Carte Interactive des Gisements d'Origine -->
                 <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
                     <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                         <h4 class="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
-                            <span>🗺️ Carte Interactive des Bassins &amp; Corridors de Covoiturage</span>
+                            <span>🗺️ Cartographie des Gisements d'Origine (Hors zone employeur)</span>
                         </h4>
                         <span class="text-[10px] bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200 font-bold">
-                            Chaque couleur représente un bassin d'origine
+                            Cliquer sur une fiche pour centrer le gisement
                         </span>
                     </div>
 
@@ -323,71 +329,78 @@ export const CarpoolingPotential = {
                 <!-- Histogramme de Compatibilité -->
                 <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
                     <h4 class="text-xs font-black uppercase text-slate-600 tracking-wider flex items-center justify-between">
-                        <span>📊 Distribution des Taux de Superposition d'Itinéraires</span>
-                        <span class="text-indigo-600 font-mono text-[10px]">${stats.carpoolableEmployeesCount} candidats identifiés</span>
+                        <span>📊 Distribution du Taux de Superposition d'Itinéraires</span>
+                        <span class="text-indigo-600 font-mono text-[10px]">${stats.carpoolableEmployeesCount} candidats covoiturables</span>
                     </h4>
                     <div class="h-56 w-full relative">
                         <canvas id="carpoolMatchChart"></canvas>
                     </div>
                 </div>
 
-                <!-- Corridors & Sub-Crews Section -->
+                <!-- Detailed Pools Section -->
                 <div class="space-y-4">
                     <h4 class="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center justify-between">
-                        <span>🚘 Détail des Bassins &amp; Équipages (${stats.macroCorridors.length} Corridors)</span>
-                        <span class="text-xs text-slate-400 font-normal">Cliquer sur un bassin pour le centrer sur la carte</span>
+                        <span>🚘 Gisements d'Affinité &amp; Compositions de Voitures (${stats.affinityPools.length} Pools Classés par Impact)</span>
+                        <span class="text-xs text-slate-400 font-normal">Triés par distance &amp; taille de gisement</span>
                     </h4>
 
-                    <div class="space-y-4">
-                        ${stats.macroCorridors.length === 0 ? `
+                    <div class="space-y-5">
+                        ${stats.affinityPools.length === 0 ? `
                             <div class="bg-white p-6 rounded-2xl border border-slate-200 text-slate-400 text-xs italic text-center">
-                                Aucun corridor formé.
+                                Aucun gisement significatif formé.
                             </div>
-                        ` : stats.macroCorridors.map((corridor, idx) => {
-                            const corridorColor = this.colorPalette[idx % this.colorPalette.length];
+                        ` : stats.affinityPools.map((pool, idx) => {
+                            const poolColor = this.colorPalette[idx % this.colorPalette.length];
                             return `
                             <div id="corridor-card-${idx}" 
                                  onclick="window.CarpoolingPotential.focusCorridor(${idx})"
-                                 class="bg-white hover:bg-slate-50/80 rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4 cursor-pointer transition-all border-l-8"
-                                 style="border-left-color: ${corridorColor}">
-                                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                 class="bg-white hover:bg-slate-50/90 rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4 cursor-pointer transition-all border-l-8"
+                                 style="border-left-color: ${poolColor}">
+                                
+                                <!-- Entête du Pool / Gisement -->
+                                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
                                     <div class="flex items-center gap-3">
-                                        <span class="w-8 h-8 rounded-xl text-white font-black text-xs flex items-center justify-center shadow-sm"
-                                              style="background-color: ${corridorColor}">
+                                        <span class="w-9 h-9 rounded-xl text-white font-black text-sm flex items-center justify-center shadow-sm"
+                                              style="background-color: ${poolColor}">
                                             #${idx + 1}
                                         </span>
                                         <div>
-                                            <div class="font-extrabold text-sm text-slate-800">
-                                                Bassin de Mobilité #${idx + 1} — <span style="color: ${corridorColor}">${corridor.totalMembers} Salariés</span>
+                                            <div class="font-extrabold text-base text-slate-800 flex items-center gap-2">
+                                                <span>Gisement d'Affinité #${idx + 1}</span>
+                                                <span class="text-xs px-2.5 py-0.5 rounded-full font-bold text-white shadow-xs" style="background-color: ${poolColor}">
+                                                    ${pool.totalMembers} Salariés Compatibles
+                                                </span>
                                             </div>
-                                            <div class="text-[10px] text-slate-400 font-mono mt-0.5">
-                                                Distance moyenne au site: ~${corridor.avgKmFromSite} km | ${corridor.subCrews.length} équipages optimaux
+                                            <div class="text-xs text-slate-500 font-mono mt-0.5">
+                                                Distance moyenne: <strong class="text-slate-700">${pool.avgKmFromSite} km</strong> | Possibilité de composer ${pool.subCrews.length} voitures
                                             </div>
                                         </div>
                                     </div>
-                                    <span class="px-3 py-1 bg-emerald-50 text-emerald-700 font-extrabold text-[10px] rounded-full border border-emerald-200">
-                                        🎯 Voir sur la carte
+                                    <span class="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs rounded-full border border-indigo-200 transition-colors">
+                                        🎯 Voir le Gisement sur la carte
                                     </span>
                                 </div>
 
-                                <!-- Cartes sous-groupes équipages (2 à 4 personnes max par voiture) -->
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    ${corridor.subCrews.map((crew, subIdx) => `
-                                        <div class="p-3.5 bg-slate-50 hover:bg-white rounded-xl border border-slate-200 text-xs space-y-2 transition-colors shadow-2xs">
-                                            <div class="flex items-center justify-between font-bold text-slate-700">
-                                                <span>Équipage ${subIdx + 1} (${crew.size} pers. max)</span>
-                                                <span class="text-emerald-600 font-mono text-[10px]">${crew.avgMatchPct}% match</span>
+                                <!-- Vue de la Composition des Voitures Recommandées (Sub-Crews) -->
+                                <div>
+                                    <div class="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider mb-2">
+                                        🚗 Proposition de Répartition en Équipages (2 à 4 pers. max) :
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                        ${pool.subCrews.map((crew, subIdx) => `
+                                            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+                                                <div class="flex items-center justify-between font-bold text-slate-700">
+                                                    <span>Voiture ${subIdx + 1} (${crew.size} places)</span>
+                                                    <span class="text-emerald-600 font-mono text-[10px]">-${crew.size - 1} auto</span>
+                                                </div>
+                                                <div class="text-[10px] text-slate-500 font-mono truncate">
+                                                    Membres: ${crew.members.map(m => m.id).join(', ')}
+                                                </div>
                                             </div>
-                                            <div class="text-[10px] text-slate-500 font-mono truncate">
-                                                Membres: ${crew.members.map(m => m.id).join(', ')}
-                                            </div>
-                                            <div class="flex justify-between items-center text-[10px] text-slate-600 pt-1 border-t border-slate-200/60 font-semibold">
-                                                <span>Trajet partagé: ~${crew.avgDist} km</span>
-                                                <span class="font-bold" style="color: ${corridorColor}">-${crew.size - 1} voiture</span>
-                                            </div>
-                                        </div>
-                                    `).join('')}
+                                        `).join('')}
+                                    </div>
                                 </div>
+
                             </div>
                         `}).join('')}
                     </div>
@@ -424,7 +437,7 @@ export const CarpoolingPotential = {
         this.corridorLayers = [];
         const allBounds = [];
 
-        // Site employeur marker
+        // Marker Site Employeur uniquement (Aucun cercle autour !)
         if (this.appState && this.appState.coordinates && this.appState.coordinates.length > 0) {
             const first = this.appState.coordinates[0];
             const siteIcon = L.divIcon({
@@ -433,43 +446,42 @@ export const CarpoolingPotential = {
                 iconSize: [36, 36],
                 iconAnchor: [18, 18]
             });
-            const compMarker = L.marker([first.end_lat, first.end_lon], { icon: siteIcon })
+            L.marker([first.end_lat, first.end_lon], { icon: siteIcon })
                 .bindPopup(`<div class="font-bold text-xs">🏢 Site Employeur</div>`)
                 .addTo(this.mapInstance);
             allBounds.push([first.end_lat, first.end_lon]);
         }
 
-        stats.macroCorridors.forEach((corridor, idx) => {
+        stats.affinityPools.forEach((pool, idx) => {
             const color = this.colorPalette[idx % this.colorPalette.length];
             const groupFeatureList = [];
 
-            // 1. Point d'origine moyen ou cluster de membres
             const memberCoords = [];
-            corridor.subCrews.forEach(crew => {
+            pool.subCrews.forEach(crew => {
                 crew.members.forEach(emp => {
                     memberCoords.push([emp.start_lat, emp.start_lon]);
                     allBounds.push([emp.start_lat, emp.start_lon]);
 
-                    // Marker salarié coloré aux couleurs du bassin
+                    // Marker salarié coloré aux couleurs du pool
                     const empIcon = L.divIcon({
-                        html: `<div style="background-color: ${color}; border: 2px solid white;" class="w-4 h-4 rounded-full shadow-md flex items-center justify-center text-[8px] text-white font-black">${idx + 1}</div>`,
+                        html: `<div style="background-color: ${color}; border: 2px solid white;" class="w-5 h-5 rounded-full shadow-md flex items-center justify-center text-[9px] text-white font-black">${idx + 1}</div>`,
                         className: '',
-                        iconSize: [16, 16],
-                        iconAnchor: [8, 8]
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
                     });
 
                     const m = L.marker([emp.start_lat, emp.start_lon], { icon: empIcon })
-                        .bindPopup(`<div class="text-xs"><strong>${emp.id}</strong><br>Bassin de Mobilité #${idx + 1}<br>Distance: ${emp.distance_km || '?'} km</div>`)
+                        .bindPopup(`<div class="text-xs"><strong>${emp.id}</strong><br>Gisement #${idx + 1}<br>Distance: ${emp.distance_km || '?'} km</div>`)
                         .addTo(this.mapInstance);
 
                     groupFeatureList.push(m);
 
-                    // Tracé léger vers l'entreprise
+                    // Ligne pointillée vers l'entreprise
                     if (emp.end_lat && emp.end_lon) {
                         const line = L.polyline([[emp.start_lat, emp.start_lon], [emp.end_lat, emp.end_lon]], {
                             color: color,
                             weight: 2,
-                            opacity: 0.45,
+                            opacity: 0.5,
                             dashArray: '5, 5'
                         }).addTo(this.mapInstance);
                         groupFeatureList.push(line);
@@ -477,40 +489,39 @@ export const CarpoolingPotential = {
                 });
             });
 
-            // 2. Zone d'enveloppe du Bassin (Cercle ou Polygone de regroupement)
-            if (memberCoords.length >= 1) {
+            // Enveloppe uniquement autour des domiciles d'ORIGINE (Gisement d'origine)
+            if (memberCoords.length >= 2) {
                 const avgLat = memberCoords.reduce((sum, c) => sum + c[0], 0) / memberCoords.length;
                 const avgLon = memberCoords.reduce((sum, c) => sum + c[1], 0) / memberCoords.length;
 
-                // Calcule le rayon max couvrant le bassin
-                let maxDist = 1.5;
+                let maxDist = 1.0;
                 memberCoords.forEach(c => {
                     const d = this.haversineDistance(avgLat, avgLon, c[0], c[1]);
                     if (d > maxDist) maxDist = d;
                 });
 
                 const clusterZone = L.circle([avgLat, avgLon], {
-                    radius: Math.min(maxDist * 1000, 8000),
+                    radius: Math.min(maxDist * 1000, 5000),
                     color: color,
                     fillColor: color,
-                    fillOpacity: 0.15,
+                    fillOpacity: 0.18,
                     weight: 2,
                     dashArray: '4, 4'
-                }).bindPopup(`<div class="font-bold text-xs text-indigo-900">Bassin #${idx + 1} (${corridor.totalMembers} salariés)</div>`)
+                }).bindPopup(`<div class="font-bold text-xs text-indigo-900">Gisement d'Origine #${idx + 1} (${pool.totalMembers} salariés)</div>`)
                   .addTo(this.mapInstance);
 
                 groupFeatureList.push(clusterZone);
             }
 
             this.corridorLayers.push({
-                corridorId: corridor.id,
+                corridorId: pool.id,
                 layers: groupFeatureList,
                 bounds: memberCoords
             });
         });
 
         if (allBounds.length > 0) {
-            this.mapInstance.fitBounds(allBounds, { padding: [30, 30] });
+            this.mapInstance.fitBounds(allBounds, { padding: [35, 35] });
         }
     },
 
@@ -518,9 +529,8 @@ export const CarpoolingPotential = {
         const item = this.corridorLayers[idx];
         if (!item || !this.mapInstance || !item.bounds || item.bounds.length === 0) return;
 
-        this.mapInstance.fitBounds(item.bounds, { padding: [50, 50], maxZoom: 14 });
+        this.mapInstance.fitBounds(item.bounds, { padding: [60, 60], maxZoom: 14 });
 
-        // Highlight visual pulse on corridor cards
         document.querySelectorAll('[id^="corridor-card-"]').forEach((c, i) => {
             c.classList.toggle('ring-2', i === idx);
             c.classList.toggle('ring-indigo-500', i === idx);
@@ -536,7 +546,7 @@ export const CarpoolingPotential = {
         this.chartInstance = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: ['> 80% (Excellent)', '60-80% (Très Bon)', '40-60% (Modéré)', '< 40% (Faible)'],
+                labels: ['> 80% (Excellente)', '60-80% (Très Bonne)', '40-60% (Modérée)', '< 40% (Exclue)'],
                 datasets: [{
                     data: [dist.high, dist.good, dist.moderate, dist.low],
                     backgroundColor: ['#10b981', '#6366f1', '#f59e0b', '#cbd5e1'],
