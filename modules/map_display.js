@@ -16,6 +16,7 @@ export const MapDisplay = {
     // Configurable heatmap parameters
     heatmapSettings: {
         radius: 30,
+        intensity: 1.2,
         threshold: 0.03
     },
 
@@ -140,7 +141,7 @@ export const MapDisplay = {
                     getPosition: d => d.coords,
                     getWeight: d => d.weight || 1,
                     radiusPixels: this.heatmapSettings.radius,
-                    intensity: 1.2,
+                    intensity: this.heatmapSettings.intensity,
                     threshold: this.heatmapSettings.threshold,
                     colorRange: [
                         [56, 189, 248, 40],   // Sky Blue halo
@@ -387,14 +388,21 @@ export const MapDisplay = {
             <div id="heatmap-sliders-box" class="pt-2 border-t border-slate-100 space-y-2 ${this.displayMode === 'flow' ? 'hidden' : ''}">
                 <div>
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
-                        <span>Diffusion Heatmap</span>
+                        <span>Diffusion (Rayon)</span>
                         <span id="val-radius" class="text-indigo-600 font-mono">${this.heatmapSettings.radius}px</span>
                     </div>
                     <input type="range" id="input-radius" min="10" max="70" value="${this.heatmapSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 </div>
                 <div>
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
-                        <span>Seuil d'intensité</span>
+                        <span>Intensité Heatmap</span>
+                        <span id="val-intensity" class="text-indigo-600 font-mono">${this.heatmapSettings.intensity}</span>
+                    </div>
+                    <input type="range" id="input-intensity" min="0.2" max="4.0" step="0.1" value="${this.heatmapSettings.intensity}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                </div>
+                <div>
+                    <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
+                        <span>Seuil de coupure</span>
                         <span id="val-threshold" class="text-indigo-600 font-mono">${this.heatmapSettings.threshold}</span>
                     </div>
                     <input type="range" id="input-threshold" min="0.01" max="0.2" step="0.01" value="${this.heatmapSettings.threshold}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
@@ -464,6 +472,12 @@ export const MapDisplay = {
         document.getElementById('input-radius').oninput = (e) => {
             this.heatmapSettings.radius = parseInt(e.target.value);
             document.getElementById('val-radius').innerText = `${this.heatmapSettings.radius}px`;
+            this.render(this.lastState);
+        };
+
+        document.getElementById('input-intensity').oninput = (e) => {
+            this.heatmapSettings.intensity = parseFloat(e.target.value);
+            document.getElementById('val-intensity').innerText = this.heatmapSettings.intensity;
             this.render(this.lastState);
         };
 
