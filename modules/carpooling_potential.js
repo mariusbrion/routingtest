@@ -1,10 +1,13 @@
 export const CarpoolingPotential = {
     appState: null,
     chartInstance: null,
+    mapInstance: null,
+    corridorLayers: [],
+    colorPalette: ['#4f46e5', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6'],
 
     init(state) {
         this.appState = state;
-        console.log("[CarpoolingPotential] Initialisation de l'Analyse par Corridors & Équipages...");
+        console.log("[CarpoolingPotential] Initialisation de l'Analyse Cartographique des Corridors...");
 
         const container = document.getElementById('carpooling-dashboard');
         if (!container) return;
@@ -267,11 +270,11 @@ export const CarpoolingPotential = {
                 <div class="bg-slate-900 text-white rounded-3xl p-8 shadow-xl border border-slate-800 flex flex-wrap justify-between items-center gap-6">
                     <div>
                         <span class="text-[10px] font-black uppercase tracking-widest text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
-                            🚗 Analyse du Gisement Covoiturage
+                            🚗 Cartographie &amp; Corridors Covoiturage
                         </span>
-                        <h3 class="text-2xl font-black mt-3">Corridors &amp; Potentiel d'Équipages</h3>
+                        <h3 class="text-2xl font-black mt-3">Analyse Spatiale des Équipages</h3>
                         <p class="text-xs text-slate-400 mt-2 max-w-2xl leading-relaxed">
-                            Analyse spatiale par calcul de superposition d'itinéraires routiers ($\ge 40\%$ partagés, hors zone d'approche du site). 
+                            Visualisation géographique des bassins d'origine et des routes partagées ($\ge 40\%$ de superposition). 
                             Priorité aux <strong class="text-white">${stats.longDistanceCount} salariés</strong> résidant à plus de 15km.
                         </p>
                     </div>
@@ -301,6 +304,22 @@ export const CarpoolingPotential = {
                     </div>
                 </div>
 
+                <!-- Carte Interactive des Corridors & Équipages -->
+                <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                        <h4 class="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
+                            <span>🗺️ Carte Interactive des Bassins &amp; Corridors de Covoiturage</span>
+                        </h4>
+                        <span class="text-[10px] bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-200 font-bold">
+                            Chaque couleur représente un bassin d'origine
+                        </span>
+                    </div>
+
+                    <div class="relative w-full h-[460px] rounded-2xl overflow-hidden border border-slate-200">
+                        <div id="carpooling-map" class="w-full h-full z-0"></div>
+                    </div>
+                </div>
+
                 <!-- Histogramme de Compatibilité -->
                 <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
                     <h4 class="text-xs font-black uppercase text-slate-600 tracking-wider flex items-center justify-between">
@@ -315,8 +334,8 @@ export const CarpoolingPotential = {
                 <!-- Corridors & Sub-Crews Section -->
                 <div class="space-y-4">
                     <h4 class="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center justify-between">
-                        <span>🗺️ Bassins de Mobilité &amp; Sous-Groupes Optimaux (${stats.macroCorridors.length} Corridors)</span>
-                        <span class="text-xs text-slate-400 font-normal">Secteurs géographiques d'origine</span>
+                        <span>🚘 Détail des Bassins &amp; Équipages (${stats.macroCorridors.length} Corridors)</span>
+                        <span class="text-xs text-slate-400 font-normal">Cliquer sur un bassin pour le centrer sur la carte</span>
                     </h4>
 
                     <div class="space-y-4">
@@ -324,31 +343,37 @@ export const CarpoolingPotential = {
                             <div class="bg-white p-6 rounded-2xl border border-slate-200 text-slate-400 text-xs italic text-center">
                                 Aucun corridor formé.
                             </div>
-                        ` : stats.macroCorridors.map((corridor, idx) => `
-                            <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                        ` : stats.macroCorridors.map((corridor, idx) => {
+                            const corridorColor = this.colorPalette[idx % this.colorPalette.length];
+                            return `
+                            <div id="corridor-card-${idx}" 
+                                 onclick="window.CarpoolingPotential.focusCorridor(${idx})"
+                                 class="bg-white hover:bg-slate-50/80 rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4 cursor-pointer transition-all border-l-8"
+                                 style="border-left-color: ${corridorColor}">
                                 <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                                     <div class="flex items-center gap-3">
-                                        <span class="w-8 h-8 rounded-xl bg-indigo-600 text-white font-black text-xs flex items-center justify-center">
+                                        <span class="w-8 h-8 rounded-xl text-white font-black text-xs flex items-center justify-center shadow-sm"
+                                              style="background-color: ${corridorColor}">
                                             #${idx + 1}
                                         </span>
                                         <div>
                                             <div class="font-extrabold text-sm text-slate-800">
-                                                Bassin de Mobilité #${idx + 1} — <span class="text-indigo-600">${corridor.totalMembers} Salariés</span>
+                                                Bassin de Mobilité #${idx + 1} — <span style="color: ${corridorColor}">${corridor.totalMembers} Salariés</span>
                                             </div>
                                             <div class="text-[10px] text-slate-400 font-mono mt-0.5">
-                                                Distance moyenne au site: ~${corridor.avgKmFromSite} km | ${corridor.subCrews.length} équipages
+                                                Distance moyenne au site: ~${corridor.avgKmFromSite} km | ${corridor.subCrews.length} équipages optimaux
                                             </div>
                                         </div>
                                     </div>
                                     <span class="px-3 py-1 bg-emerald-50 text-emerald-700 font-extrabold text-[10px] rounded-full border border-emerald-200">
-                                        ~${corridor.subCrews.length} voitures actives
+                                        🎯 Voir sur la carte
                                     </span>
                                 </div>
 
                                 <!-- Cartes sous-groupes équipages (2 à 4 personnes max par voiture) -->
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                                     ${corridor.subCrews.map((crew, subIdx) => `
-                                        <div class="p-3.5 bg-slate-50 hover:bg-indigo-50/40 rounded-xl border border-slate-200 text-xs space-y-2 transition-colors">
+                                        <div class="p-3.5 bg-slate-50 hover:bg-white rounded-xl border border-slate-200 text-xs space-y-2 transition-colors shadow-2xs">
                                             <div class="flex items-center justify-between font-bold text-slate-700">
                                                 <span>Équipage ${subIdx + 1} (${crew.size} pers. max)</span>
                                                 <span class="text-emerald-600 font-mono text-[10px]">${crew.avgMatchPct}% match</span>
@@ -358,13 +383,13 @@ export const CarpoolingPotential = {
                                             </div>
                                             <div class="flex justify-between items-center text-[10px] text-slate-600 pt-1 border-t border-slate-200/60 font-semibold">
                                                 <span>Trajet partagé: ~${crew.avgDist} km</span>
-                                                <span class="text-indigo-600 font-bold">-${crew.size - 1} voiture</span>
+                                                <span class="font-bold" style="color: ${corridorColor}">-${crew.size - 1} voiture</span>
                                             </div>
                                         </div>
                                     `).join('')}
                                 </div>
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
                 </div>
 
@@ -372,6 +397,134 @@ export const CarpoolingPotential = {
         `;
 
         this.renderMatchChart(stats.scoreDistribution);
+
+        setTimeout(() => {
+            this.initCarpoolMap(stats);
+        }, 150);
+    },
+
+    initCarpoolMap(stats) {
+        if (typeof L === 'undefined') return;
+
+        const container = document.getElementById('carpooling-map');
+        if (!container) return;
+
+        if (this.mapInstance) {
+            this.mapInstance.remove();
+            this.mapInstance = null;
+        }
+
+        this.mapInstance = L.map('carpooling-map', { zoomControl: false });
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 19
+        }).addTo(this.mapInstance);
+        L.control.zoom({ position: 'bottomleft' }).addTo(this.mapInstance);
+
+        this.corridorLayers = [];
+        const allBounds = [];
+
+        // Site employeur marker
+        if (this.appState && this.appState.coordinates && this.appState.coordinates.length > 0) {
+            const first = this.appState.coordinates[0];
+            const siteIcon = L.divIcon({
+                html: `<div class="company-marker text-3xl">🏢</div>`,
+                className: '',
+                iconSize: [36, 36],
+                iconAnchor: [18, 18]
+            });
+            const compMarker = L.marker([first.end_lat, first.end_lon], { icon: siteIcon })
+                .bindPopup(`<div class="font-bold text-xs">🏢 Site Employeur</div>`)
+                .addTo(this.mapInstance);
+            allBounds.push([first.end_lat, first.end_lon]);
+        }
+
+        stats.macroCorridors.forEach((corridor, idx) => {
+            const color = this.colorPalette[idx % this.colorPalette.length];
+            const groupFeatureList = [];
+
+            // 1. Point d'origine moyen ou cluster de membres
+            const memberCoords = [];
+            corridor.subCrews.forEach(crew => {
+                crew.members.forEach(emp => {
+                    memberCoords.push([emp.start_lat, emp.start_lon]);
+                    allBounds.push([emp.start_lat, emp.start_lon]);
+
+                    // Marker salarié coloré aux couleurs du bassin
+                    const empIcon = L.divIcon({
+                        html: `<div style="background-color: ${color}; border: 2px solid white;" class="w-4 h-4 rounded-full shadow-md flex items-center justify-center text-[8px] text-white font-black">${idx + 1}</div>`,
+                        className: '',
+                        iconSize: [16, 16],
+                        iconAnchor: [8, 8]
+                    });
+
+                    const m = L.marker([emp.start_lat, emp.start_lon], { icon: empIcon })
+                        .bindPopup(`<div class="text-xs"><strong>${emp.id}</strong><br>Bassin de Mobilité #${idx + 1}<br>Distance: ${emp.distance_km || '?'} km</div>`)
+                        .addTo(this.mapInstance);
+
+                    groupFeatureList.push(m);
+
+                    // Tracé léger vers l'entreprise
+                    if (emp.end_lat && emp.end_lon) {
+                        const line = L.polyline([[emp.start_lat, emp.start_lon], [emp.end_lat, emp.end_lon]], {
+                            color: color,
+                            weight: 2,
+                            opacity: 0.45,
+                            dashArray: '5, 5'
+                        }).addTo(this.mapInstance);
+                        groupFeatureList.push(line);
+                    }
+                });
+            });
+
+            // 2. Zone d'enveloppe du Bassin (Cercle ou Polygone de regroupement)
+            if (memberCoords.length >= 1) {
+                const avgLat = memberCoords.reduce((sum, c) => sum + c[0], 0) / memberCoords.length;
+                const avgLon = memberCoords.reduce((sum, c) => sum + c[1], 0) / memberCoords.length;
+
+                // Calcule le rayon max couvrant le bassin
+                let maxDist = 1.5;
+                memberCoords.forEach(c => {
+                    const d = this.haversineDistance(avgLat, avgLon, c[0], c[1]);
+                    if (d > maxDist) maxDist = d;
+                });
+
+                const clusterZone = L.circle([avgLat, avgLon], {
+                    radius: Math.min(maxDist * 1000, 8000),
+                    color: color,
+                    fillColor: color,
+                    fillOpacity: 0.15,
+                    weight: 2,
+                    dashArray: '4, 4'
+                }).bindPopup(`<div class="font-bold text-xs text-indigo-900">Bassin #${idx + 1} (${corridor.totalMembers} salariés)</div>`)
+                  .addTo(this.mapInstance);
+
+                groupFeatureList.push(clusterZone);
+            }
+
+            this.corridorLayers.push({
+                corridorId: corridor.id,
+                layers: groupFeatureList,
+                bounds: memberCoords
+            });
+        });
+
+        if (allBounds.length > 0) {
+            this.mapInstance.fitBounds(allBounds, { padding: [30, 30] });
+        }
+    },
+
+    focusCorridor(idx) {
+        const item = this.corridorLayers[idx];
+        if (!item || !this.mapInstance || !item.bounds || item.bounds.length === 0) return;
+
+        this.mapInstance.fitBounds(item.bounds, { padding: [50, 50], maxZoom: 14 });
+
+        // Highlight visual pulse on corridor cards
+        document.querySelectorAll('[id^="corridor-card-"]').forEach((c, i) => {
+            c.classList.toggle('ring-2', i === idx);
+            c.classList.toggle('ring-indigo-500', i === idx);
+        });
     },
 
     renderMatchChart(dist) {
