@@ -5,9 +5,17 @@ export const MapDisplay = {
     lastState: null,
     isCityValidated: false,
     displayMode: 'both', // 'heatmap' | 'flow' | 'both'
+    
+    // Configurable heatmap parameters
     heatmapSettings: {
-        radius: 20,
-        threshold: 0.04
+        radius: 30,
+        threshold: 0.03
+    },
+
+    // Configurable point parameters (Size & Visibility)
+    pointSettings: {
+        radius: 25,
+        visible: true
     },
 
     render(state) {
@@ -18,7 +26,7 @@ export const MapDisplay = {
         if (logs) logs.style.display = 'none';
 
         this.initCityAutocomplete();
-        this.initHeatmapControls();
+        this.initMapControls();
 
         const saveBtn = document.getElementById('btn-cloud-save');
         if (saveBtn && !saveBtn.dataset.init) {
@@ -30,6 +38,12 @@ export const MapDisplay = {
         const pointFeatures = [];
         const decodedRoutes = [];
 
+        // Extract employer destination coordinate to prevent destination stacking in heatmap
+        let companyCoords = null;
+        if (state.routes.length > 0 && state.routes[0].end_lon && state.routes[0].end_lat) {
+            companyCoords = [state.routes[0].end_lon, state.routes[0].end_lat];
+        }
+
         state.routes.forEach(route => {
             let coords = [];
             if (route.status === 'success' && route.geometry) {
@@ -40,7 +54,9 @@ export const MapDisplay = {
 
             if (coords.length > 0) {
                 decodedRoutes.push(coords);
-                const sampled = this.samplePolylinePoints(coords, 0.03);
+                
+                // Sample route points without over-concentrating at the employer destination node
+                const sampled = this.samplePolylinePoints(coords, 0.03, companyCoords);
                 sampled.forEach(p => allTrajectoryPoints.push(p));
 
                 pointFeatures.push({
@@ -86,50 +102,54 @@ export const MapDisplay = {
             })
         ];
 
+        // 1. Heatmap Layer with expanded dispersion color gradient
         if (this.displayMode === 'heatmap' || this.displayMode === 'both') {
             layers.push(
                 new deck.HeatmapLayer({
                     id: 'heatmap-layer',
                     data: allTrajectoryPoints,
                     getPosition: d => d.coords,
-                    getWeight: () => 1,
+                    getWeight: d => d.weight || 1,
                     radiusPixels: this.heatmapSettings.radius,
-                    intensity: 1.8,
+                    intensity: 1.4,
                     threshold: this.heatmapSettings.threshold,
                     colorRange: [
-                        [255, 255, 204, 30],  // Halo Jaune très clair
-                        [254, 217, 118, 120], // Jaune chaud
-                        [254, 178, 76, 180],  // Orange vif
-                        [240, 59, 32, 220],   // Rouge
-                        [189, 0, 38, 245],    // Rouge foncé / Carmin
-                        [128, 0, 38, 255]     // Violet / Bordeaux intense
+                        [56, 189, 248, 40],   // Light Sky Blue halo
+                        [45, 212, 191, 120],  // Soft Teal
+                        [250, 204, 21, 180],  // Vibrant Yellow
+                        [249, 115, 22, 220],  // Bright Orange
+                        [220, 38, 38, 245],   // Crimson Red
+                        [153, 27, 27, 255]    // Deep Burgundy
                     ]
                 })
             );
         }
 
+        // 2. Flow Path Layer with intuitive cold-to-hot palette
         if (this.displayMode === 'flow' || this.displayMode === 'both') {
             layers.push(
                 new deck.PathLayer({
                     id: 'routes-flow-layer',
                     data: segments,
                     getPath: d => d.path,
-                    getColor: d => this.getSegmentColor(d.count, maxPassages),
-                    getWidth: d => this.getSegmentWidth(d.count, maxPassages),
+                    getColor: d => this.getSegmentColor(d.count),
+                    getWidth: d => this.getSegmentWidth(d.count),
                     widthMinPixels: 2,
                     pickable: true
                 })
             );
         }
 
+        // 3. Employee & Employer Points Layer (Toggleable size & visibility)
         layers.push(
             new deck.GeoJsonLayer({
                 id: 'points-layer',
                 data: { type: "FeatureCollection", features: pointFeatures },
-                pickable: true,
+                pickable: this.pointSettings.visible,
+                visible: this.pointSettings.visible,
                 getFillColor: d => d.properties.type === 'arrivee' ? [239, 68, 68] : [34, 197, 94],
-                getPointRadius: 25,
-                pointRadiusMinPixels: 5
+                getPointRadius: this.pointSettings.radius,
+                pointRadiusMinPixels: this.pointSettings.visible ? Math.max(2, Math.round(this.pointSettings.radius / 5)) : 0
             })
         );
 
@@ -144,15 +164,17 @@ export const MapDisplay = {
                 glOptions: { preserveDrawingBuffer: true },
                 getTooltip: ({object}) => {
                     if (!object) return null;
-                    if (object.count) return `${object.count} passage(s) de salarié(s)`;
+                    if (object.count) return `🔀 ${object.count} passage(s) de salarié(s)`;
                     if (object.properties && object.properties.range_km) return `Isochrone: ${object.properties.range_km} km`;
-                    if (object.properties && object.properties.type) return object.properties.type === 'arrivee' ? "Site Employeur" : "Départ Employé";
+                    if (object.properties && object.properties.type) return object.properties.type === 'arrivee' ? "🏢 Site Employeur" : "🏠 Départ Employé";
                     return null;
                 }
             });
         } else {
             this.deckgl.setProps({ layers, initialViewState: initialView });
         }
+
+        this.updateLegendUI();
     },
 
     computeSegmentFrequencies(routes) {
@@ -184,33 +206,36 @@ export const MapDisplay = {
         };
     },
 
-    getSegmentColor(count, maxCount) {
-        if (count === 1) return [234, 179, 8, 180];    // Jaune (1 passage)
-        if (count <= 3) return [249, 115, 22, 220];   // Orange (2-3 passages)
-        if (count <= 6) return [239, 68, 68, 240];    // Rouge (4-6 passages)
-        if (count <= 10) return [185, 28, 28, 255];   // Rouge sombre (7-10 passages)
-        return [126, 34, 206, 255];                   // Pourpre / Bordeaux (10+ passages)
+    // Intuitive Western palette: Light Blue -> Teal -> Yellow -> Orange -> Dark Red
+    getSegmentColor(count) {
+        if (count === 1) return [56, 189, 248, 190];     // Sky Blue (1 passage)
+        if (count <= 3) return [45, 212, 191, 210];    // Teal (2-3 passages)
+        if (count <= 6) return [250, 204, 21, 230];    // Bright Yellow (4-6 passages)
+        if (count <= 10) return [249, 115, 22, 245];   // Orange (7-10 passages)
+        return [185, 28, 28, 255];                     // Deep Dark Red (10+ passages)
     },
 
-    getSegmentWidth(count, maxCount) {
+    getSegmentWidth(count) {
         if (count === 1) return 3;
         if (count <= 3) return 5;
         if (count <= 6) return 7;
-        return 9;
+        if (count <= 10) return 9;
+        return 12;
     },
 
-    initHeatmapControls() {
-        if (document.getElementById('heatmap-controls')) return;
+    initMapControls() {
+        if (document.getElementById('map-controls-panel')) return;
 
         const container = document.getElementById('map-container');
         if (!container) return;
 
         const controls = document.createElement('div');
-        controls.id = 'heatmap-controls';
-        controls.className = 'absolute top-4 right-4 bg-white/95 backdrop-blur p-4 rounded-2xl shadow-xl z-[50] border border-slate-200 w-56 space-y-3';
+        controls.id = 'map-controls-panel';
+        controls.className = 'absolute top-4 right-4 bg-white/95 backdrop-blur p-4 rounded-2xl shadow-xl z-[50] border border-slate-200 w-64 space-y-3';
         controls.innerHTML = `
-            <h4 class="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Visualisation des Flux</h4>
+            <h4 class="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Visualisation & Style</h4>
             
+            <!-- Mode Toggle -->
             <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
                 <button id="btn-mode-heatmap" class="flex-1 py-1 text-[9px] font-bold rounded-lg transition-all ${this.displayMode === 'heatmap' ? 'bg-indigo-600 text-white shadow' : 'text-slate-600'}">
                     🔥 Heatmap
@@ -223,13 +248,14 @@ export const MapDisplay = {
                 </button>
             </div>
 
-            <div id="heatmap-sliders-box" class="pt-1 border-t border-slate-100 ${this.displayMode === 'flow' ? 'hidden' : ''}">
-                <div class="mb-2">
+            <!-- Heatmap Controls -->
+            <div id="heatmap-sliders-box" class="pt-2 border-t border-slate-100 space-y-2 ${this.displayMode === 'flow' ? 'hidden' : ''}">
+                <div>
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
-                        <span>Rayon de diffusion</span>
+                        <span>Diffusion Heatmap</span>
                         <span id="val-radius" class="text-indigo-600">${this.heatmapSettings.radius}px</span>
                     </div>
-                    <input type="range" id="input-radius" min="5" max="60" value="${this.heatmapSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                    <input type="range" id="input-radius" min="10" max="70" value="${this.heatmapSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 </div>
                 <div>
                     <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
@@ -237,6 +263,24 @@ export const MapDisplay = {
                         <span id="val-threshold" class="text-indigo-600">${this.heatmapSettings.threshold}</span>
                     </div>
                     <input type="range" id="input-threshold" min="0.01" max="0.2" step="0.01" value="${this.heatmapSettings.threshold}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                </div>
+            </div>
+
+            <!-- Points Controls (Size & Toggle) -->
+            <div class="pt-2 border-t border-slate-100 space-y-2">
+                <div class="flex justify-between items-center">
+                    <span class="text-[9px] font-extrabold uppercase text-slate-500">Points Salariés/Employeur</span>
+                    <button id="btn-toggle-points" class="px-2 py-0.5 text-[9px] font-bold rounded-lg border transition-all ${this.pointSettings.visible ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-400 border-slate-200'}">
+                        ${this.pointSettings.visible ? '👁️ Visibles' : '🙈 Masqués'}
+                    </button>
+                </div>
+                
+                <div id="point-radius-box" class="${this.pointSettings.visible ? '' : 'hidden'}">
+                    <div class="flex justify-between items-center text-[9px] font-bold text-slate-600 mb-1">
+                        <span>Taille des marqueurs</span>
+                        <span id="val-point-radius" class="text-indigo-600">${this.pointSettings.radius}px</span>
+                    </div>
+                    <input type="range" id="input-point-radius" min="5" max="60" value="${this.pointSettings.radius}" class="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                 </div>
             </div>
         `;
@@ -263,11 +307,78 @@ export const MapDisplay = {
             document.getElementById('val-radius').innerText = `${this.heatmapSettings.radius}px`;
             this.render(this.lastState);
         };
+
         document.getElementById('input-threshold').oninput = (e) => {
             this.heatmapSettings.threshold = parseFloat(e.target.value);
             document.getElementById('val-threshold').innerText = this.heatmapSettings.threshold;
             this.render(this.lastState);
         };
+
+        // Point toggle event handler
+        document.getElementById('btn-toggle-points').onclick = () => {
+            this.pointSettings.visible = !this.pointSettings.visible;
+            const btn = document.getElementById('btn-toggle-points');
+            btn.className = `px-2 py-0.5 text-[9px] font-bold rounded-lg border transition-all ${this.pointSettings.visible ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-400 border-slate-200'}`;
+            btn.innerText = this.pointSettings.visible ? '👁️ Visibles' : '🙈 Masqués';
+
+            const radiusBox = document.getElementById('point-radius-box');
+            if (radiusBox) radiusBox.classList.toggle('hidden', !this.pointSettings.visible);
+
+            this.render(this.lastState);
+        };
+
+        // Point size slider event handler
+        document.getElementById('input-point-radius').oninput = (e) => {
+            this.pointSettings.radius = parseInt(e.target.value);
+            document.getElementById('val-point-radius').innerText = `${this.pointSettings.radius}px`;
+            this.render(this.lastState);
+        };
+    },
+
+    updateLegendUI() {
+        let legend = document.getElementById('flow-legend-widget');
+        
+        if (this.displayMode === 'heatmap') {
+            if (legend) legend.remove();
+            return;
+        }
+
+        const container = document.getElementById('map-container');
+        if (!container) return;
+
+        if (!legend) {
+            legend = document.createElement('div');
+            legend.id = 'flow-legend-widget';
+            legend.className = 'absolute bottom-6 right-4 bg-white/95 backdrop-blur p-3 rounded-2xl shadow-xl z-[40] border border-slate-200 text-xs w-48 space-y-1.5';
+            container.appendChild(legend);
+        }
+
+        legend.innerHTML = `
+            <div class="text-[9px] font-black uppercase text-slate-500 tracking-wider mb-2 flex items-center justify-between">
+                <span>Légende des Flux</span>
+                <span class="text-indigo-600">Passages</span>
+            </div>
+            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
+                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(56, 189, 248)"></span>
+                <span>1 passage</span>
+            </div>
+            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
+                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(45, 212, 191)"></span>
+                <span>2 - 3 passages</span>
+            </div>
+            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
+                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(250, 204, 21)"></span>
+                <span>4 - 6 passages</span>
+            </div>
+            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700">
+                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(249, 115, 22)"></span>
+                <span>7 - 10 passages</span>
+            </div>
+            <div class="flex items-center space-x-2 text-[10px] font-semibold text-slate-700 font-bold">
+                <span class="w-3 h-3 rounded-full inline-block shrink-0" style="background-color: rgb(185, 28, 28)"></span>
+                <span>10+ passages</span>
+            </div>
+        `;
     },
 
     getMapImage() {
@@ -436,14 +547,25 @@ export const MapDisplay = {
         return R * 2 * Math.atan2(Math.sqrt(clampedA), Math.sqrt(1 - clampedA));
     },
 
-    samplePolylinePoints(coords, stepKm = 0.03) {
+    // Sample route geometry into discrete spatial points, excluding the company terminal stack to allow heat dispersion along roads
+    samplePolylinePoints(coords, stepKm = 0.03, companyCoords = null) {
         const points = [];
         if (!coords || coords.length === 0) return points;
 
         for (let i = 0; i < coords.length - 1; i++) {
             const p1 = coords[i];
             const p2 = coords[i + 1];
-            points.push({ coords: p1 });
+
+            // If point is within 80m of the employer destination, omit/downweight to avoid hotspot spike
+            let weight = 1;
+            if (companyCoords) {
+                const distToCompany = this.haversineDistance(p1[1], p1[0], companyCoords[1], companyCoords[0]);
+                if (distToCompany < 0.08) {
+                    weight = 0.1; // Greatly reduce destination node weight
+                }
+            }
+
+            points.push({ coords: p1, weight });
 
             const dist = this.haversineDistance(p1[1], p1[0], p2[1], p2[0]);
 
@@ -453,12 +575,16 @@ export const MapDisplay = {
                     const ratio = s / (steps + 1);
                     const interpLon = p1[0] + (p2[0] - p1[0]) * ratio;
                     const interpLat = p1[1] + (p2[1] - p1[1]) * ratio;
-                    points.push({ coords: [interpLon, interpLat] });
+
+                    let interpWeight = 1;
+                    if (companyCoords) {
+                        const distToComp = this.haversineDistance(interpLat, interpLon, companyCoords[1], companyCoords[0]);
+                        if (distToComp < 0.08) interpWeight = 0.1;
+                    }
+
+                    points.push({ coords: [interpLon, interpLat], weight: interpWeight });
                 }
             }
-        }
-        if (coords.length > 0) {
-            points.push({ coords: coords[coords.length - 1] });
         }
         return points;
     },
