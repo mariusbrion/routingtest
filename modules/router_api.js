@@ -515,6 +515,23 @@ export const RouterAPI = {
 
         appendLog(`> Démarrage du streaming WFS IGN BD TOPO par paquets de ${chunkSize}...`);
 
+        // Assainissement BBOX et sécurisation des paires Min/Max pour éviter les valeurs NaN ou inversées
+        const safeMinLat = bbox ? Math.min(bbox.minLat, bbox.maxLat) : NaN;
+        const safeMaxLat = bbox ? Math.max(bbox.minLat, bbox.maxLat) : NaN;
+        const safeMinLng = bbox ? Math.min(bbox.minLng, bbox.maxLng) : NaN;
+        const safeMaxLng = bbox ? Math.max(bbox.minLng, bbox.maxLng) : NaN;
+
+        // Formats BBOX sécurisés
+        const standardBboxStr = (!isNaN(safeMinLat) && !isNaN(safeMinLng))
+            ? `${safeMinLat.toFixed(6)},${safeMinLng.toFixed(6)},${safeMaxLat.toFixed(6)},${safeMaxLng.toFixed(6)},urn:ogc:def:crs:EPSG::4326`
+            : bboxString;
+
+        const fallbackBboxStr = (!isNaN(safeMinLat) && !isNaN(safeMinLng))
+            ? `${safeMinLng.toFixed(6)},${safeMinLat.toFixed(6)},${safeMaxLng.toFixed(6)},${safeMaxLat.toFixed(6)},EPSG:4326`
+            : `${bbox.minLng.toFixed(6)},${bbox.minLat.toFixed(6)},${bbox.maxLng.toFixed(6)},${bbox.maxLat.toFixed(6)},EPSG:4326`;
+
+        let currentBboxParam = standardBboxStr;
+
         while (!isLastPage) {
             callCount++;
             
@@ -524,14 +541,28 @@ export const RouterAPI = {
             url.searchParams.append('REQUEST', 'GetFeature');
             url.searchParams.append('OUTPUTFORMAT', 'application/json');
             url.searchParams.append('SRSNAME', 'EPSG:4326');
-            url.searchParams.append('BBOX', bboxString);
+            url.searchParams.append('BBOX', currentBboxParam);
             url.searchParams.append('TYPENAMES', 'BDTOPO_V3:troncon_de_route');
             url.searchParams.append('COUNT', chunkSize.toString());
             url.searchParams.append('STARTINDEX', startIndex.toString());
 
             try {
-                const response = await fetch(url.toString());
-                if (!response.ok) throw new Error(`Code HTTP ${response.status}`);
+                let response = await fetch(url.toString());
+
+                // Interception automatique des erreurs 400 pour tenter le format BBOX de repli
+                if (!response.ok) {
+                    if (response.status === 400 && currentBboxParam !== fallbackBboxStr) {
+                        appendLog(`> ⚠️ Format BBOX rejeté par IGN (HTTP 400). Tentative avec le format de repli...`);
+                        currentBboxParam = fallbackBboxStr;
+                        url.searchParams.set('BBOX', currentBboxParam);
+                        
+                        response = await fetch(url.toString());
+                        if (!response.ok) throw new Error(`Code HTTP ${response.status}`);
+                    } else {
+                        throw new Error(`Code HTTP ${response.status}`);
+                    }
+                }
+
                 const data = await response.json();
 
                 if (data && data.features && data.features.length > 0) {
@@ -547,25 +578,7 @@ export const RouterAPI = {
                         startIndex += chunkSize;
                     }
                 } else {
-                    if (callCount === 1 && totalReceivedFeatures === 0) {
-                        const altBboxStr = `${bbox.minLng.toFixed(6)},${bbox.minLat.toFixed(6)},${bbox.maxLng.toFixed(6)},${bbox.maxLat.toFixed(6)},EPSG:4326`;
-                        url.searchParams.set('BBOX', altBboxStr);
-                        const altResp = await fetch(url.toString());
-                        if (altResp.ok) {
-                            const altData = await altResp.json();
-                            if (altData && altData.features && altData.features.length > 0) {
-                                totalReceivedFeatures += altData.features.length;
-                                this.worker.postMessage({ type: 'BUILD_CHUNK', data: altData.features });
-                                appendLog(`> [Paquet #${callCount}] ${altData.features.length} tronçons transmis au Worker...`);
-                                if (altData.features.length >= chunkSize) {
-                                    startIndex += chunkSize;
-                                    isLastPage = false;
-                                } else {
-                                    isLastPage = true;
-                                }
-                            } else { isLastPage = true; }
-                        } else { isLastPage = true; }
-                    } else { isLastPage = true; }
+                    isLastPage = true;
                 }
             } catch (err) {
                 console.error("[RouterAPI] Erreur WFS:", err);
